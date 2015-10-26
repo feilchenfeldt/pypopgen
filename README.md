@@ -1,2 +1,2 @@
-# hs_genomics
-Scripts, modules and notebooks for genome sequencing data analysis
+# pypopgen
+Scripts, modules and notebooks for genome sequencing data analysis with a focus on population genetic analysis
