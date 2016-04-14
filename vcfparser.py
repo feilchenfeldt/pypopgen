@@ -190,6 +190,7 @@ class Walker(object):
             logging.info("{}Parsing vcf body of {}.".format(self.id,fh))
             line_it = self._yield_split_line(fh)
             for d in line_it:
+                #logging.debug("hallo")
                 self.parser.parse_fun(d)
             #not perfect implementation, prev_pos is not necessarily updated 
             #in children if _skip_duplicate_line is overidden
@@ -387,6 +388,8 @@ class SerialWalker(Walker):
                                       "and int(d[1]) < self.parser.chunk[2] = {}".format(
                                           self.parser.chunk,d[1],
                                 int(d[1]) >= self.parser.chunk[1],int(d[1]) < self.parser.chunk[2]))
+                else:
+                    self.parser.parse_fun(d)
             #not perfect implementation, prev_pos is not necessarily updated 
             #in children if _skip_duplicate_line is overidden
             logging.info("{}Finished: {} lines at {} {}".format(self.id,self.i,self.prev_chrom,self.prev_pos))
@@ -1418,6 +1421,53 @@ class FiltersToFasta(LineWriteParser):#(LineWriteParser):
             self.pos += 1
     def output_fun(self):
         self.out_file.write('\n')
+
+class FiltersToBed(LineWriteParser):
+    """
+    Write all filter entries into bed file.
+    Only works with all-sites VCF.
+    """
+    args = {#'one_file':{'type':bool,'action':'store_true','default':'False',
+            #         'help':"Write entries for all filter columns in a single file. "
+            #                "Otherwise one file per filter"},
+            'out_file':
+                {'required':True,
+                'type':argparse.FileType('w'),
+                'help':"File path to write output fasta to."}}
+    def __init__(self,**kwa):
+        self.filter_open = {}
+
+    def header_fun(self, line):
+        if line[:len('##FILTER')] == '##FILTER':
+           filter_line_dic = get_header_line_dic(line)
+           self.filter_open.update({filter_line_dic['ID']:[None,None,None]})
+
+    def parse_fun(self, sline):
+        chrom = sline[0]
+        pos = int(sline[1])
+        filter = sline[6]
+        if filter not in ['.','PASS','Pass']:
+            filters = filter.split(";")
+            for f, (chrom0, start, end) in self.filter_open.iteritems():
+                if chrom0 is not None \
+                    and chrom0 != chrom:
+                        self.out_file.write("{}\t{}\t{}\t{}\n".format(chrom0, start, end, f))
+                        self.filter_open[f] = chrom0, start, end  = [None, None, None]
+                if chrom0 == None:
+                    if f in filters:
+                        self.filter_open[f] = [chrom, pos - 1, pos]
+                else:
+                    if f in filters:
+                        self.filter_open[f][2] = pos
+                    else:
+                        self.out_file.write("{}\t{}\t{}\t{}\n".format(chrom, start, end, f))
+                        self.filter_open[f] = [None, None, None]
+        else:
+            for f, (chrom0, start, end) in self.filter_open.iteritems():
+                if chrom0 is not None:
+                    self.out_file.write("{}\t{}\t{}\t{}\n".format(chrom0, start ,end, f))
+                    self.filter_open[f] = [None, None, None]
+
 
 
 class FiltersToFasta2(LineWriteParser):#(LineWriteParser):
