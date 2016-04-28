@@ -635,6 +635,7 @@ def parmap(f, X, nprocs):
 
 def get_header_line_dic(line):
     import re
+    dic = {}
     try:
         #split all commas except if in quotes
         r = re.compile('[^,]+".+"[^,]*'
@@ -642,9 +643,11 @@ def get_header_line_dic(line):
                 '[^,]+')
         tags = r.findall(line.strip().split('=<')[1][:-1])
         dic = {k:v for k,v in [t.split('=') for t  in tags]}
-    except ValueError:
-        print line.strip().split('=<')[1][:-1].split(',')
-        print  [t.split('=') for t  in line.strip().split('=<')[1][:-1].split(',')]
+    except ValueError, e:
+        logging.warning("Could not parse line: {}".format(line))
+        logging.warning("Ignoring parse error: {}".format(str(e)))
+        #print line.strip().split('=<')[1][:-1].split(',')
+        #print  [t.split('=') for t  in line.strip().split('=<')[1][:-1].split(',')]
     return dic
 
 
