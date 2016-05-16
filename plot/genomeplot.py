@@ -119,13 +119,22 @@ def plot_chrom_series(series,chrom_len,plotfun=None,grid=None,parent_gridelement
     if color is None:
         color = mpl.rcParams['axes.color_cycle'][0]
     color = converter.to_rgb(color) 
-    chroms = series.index.get_level_values(level=0).unique()
+    #chroms = series.index.get_level_values(level=0).unique()
+    try: 
+        chroms = chrom_len.index
+    except AttributeError:
+        chroms = chrom_len.keys()
+
+    axes = {}
     for i,(chrom, gr) in enumerate(zip(chroms,grid)):
+        #print chrom
         if i == 0:
             ax = fig.add_subplot(gr)
         else:
             ax = fig.add_subplot(gr, sharey=ax)
             ax.set_yticks([])
+
+        axes.update({chrom:ax})
         
         if i % 2 == 0:
             color1 = tuple(np.array(color)*0.6)
@@ -139,13 +148,17 @@ def plot_chrom_series(series,chrom_len,plotfun=None,grid=None,parent_gridelement
         ax.set_xlim([0,chrom_len[chrom]])
        # if chrom == 'CAE3':
             #print series.ix[chrom].index.values[~np.isnan(series.ix[chrom].values)]
-        
-        plotfun(series.ix[chrom].index.values,series.ix[chrom].values,'.',color=color1,rasterized=True,**kwa)
+        try:
+            chrom_series = series.ix[chrom]
+        except KeyError:
+            continue
+        plotfun(chrom_series.index.values,chrom_series.values,'.',color=color1,rasterized=True,**kwa)
     ylim = ax.get_ylim()
     #we could also get the parent element with gr.get_topmost_subplotspec()
     #we don't share y here because otherwise the ticks are interdependent,
     #is there a way to turn tick on for only one of the shared axes?
     total_ax = fig.add_subplot(parent_gridelement) 
+    axes.update({"total_ax" : total_ax})
     total_ax.set_frame_on(False)
     total_ax.spines['top'].set_visible(True)
     total_ax.set_ylim(ylim)
@@ -160,6 +173,7 @@ def plot_chrom_series(series,chrom_len,plotfun=None,grid=None,parent_gridelement
         
     if rightlabel is not None:
         ax2 = ax.twinx()
+        axes.update({"right_ax":ax2})
         ax2.set_ylabel(rightlabel, color=color1,fontsize=16)
         ax2.set_yticks([])
         ax2.spines['top'].set_visible(False)
@@ -170,7 +184,7 @@ def plot_chrom_series(series,chrom_len,plotfun=None,grid=None,parent_gridelement
     if title is not None:
         plt.title(title)#, position=(0.5,1.02),va='bottom'
 
-    return fig, total_ax, grid
+    return fig, axes, grid
 
 def plot_features(gene_df,annotate=True,feature_name="symbol",ax=None,xlim=None):
     if ax is None:
