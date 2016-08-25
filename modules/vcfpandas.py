@@ -76,7 +76,7 @@ def get_vcf_df(fn, chrom, start=None, end=None, header=None, **read_csv_args):
             region += '-' + str(end)
 
     tabix_stream = subprocess.Popen(['tabix',fn, region], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    vcf_df = pd.read_csv(tabix_stream.stdout, sep="\t", index_col=[0,1], header=False, names = header, **read_csv_args)
+    vcf_df = pd.read_csv(tabix_stream.stdout, sep="\t", index_col=[0,1], header=None, names = header, **read_csv_args)
     
     return vcf_df
 
@@ -95,7 +95,19 @@ def get_genotype(s):
         return 1
     else:
         return np.nan
-    
+
+def get_first_haplotype(s):
+    gt_str = s.split(':',1)[0]
+    return int(gt_str[0])
+
+def get_second_haplotype(s):
+    gt_str = s.split(':',1)[0]
+    return int(gt_str[2])
+
+def get_haplotype(s):
+    gt_str = s.split(':',1)[0]
+    return  int(gt_str[0]), int(gt_str[2]) 
+
 def get_info_dic(s):
     """
     Parse the string from the VCF INFO
@@ -123,7 +135,20 @@ class converters:
     def genotype_converter(samples):
         return {n:get_genotype for n in samples}
 
+    @staticmethod
+    def haplotype_converter(samples):
+        return {n:get_haplotype for n in samples}
+
+    @staticmethod
+    def first_haplotype(samples):
+        return {n:get_first_haplotype for n in samples}
+
+    @staticmethod
+    def second_haplotype(samples):
+        return {n:get_second_haplotype for n in samples}
+
 def get_genotype_df(fn, chrom, start=None, end=None, header=None):
+
 
     if header is None:
         header, _ = parse_vcf_header(fn)

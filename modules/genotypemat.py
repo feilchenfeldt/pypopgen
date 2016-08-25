@@ -3,7 +3,6 @@ import numpy as np
 import pandas as pd
 
 
-
 def pairwise_diff_numpy(gen_arr):
     """Squared pairwise distances between all 
     columns of 0,1,2 genotype array arr.
