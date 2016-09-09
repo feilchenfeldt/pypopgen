@@ -729,7 +729,7 @@ def get_partner_control_f(fstat_df, f='f', Z='Z'):
 #------------------------------------------------------------------
 
 def get_f_reduced(f_df_pc, etetree, outgroup=''):
-    t = copy.deepcopy(etetree)
+    t = etetree
     f_reduced = f_df_pc.copy()
     for node in  t.iter_descendants():
         if node.children:
@@ -737,7 +737,7 @@ def get_f_reduced(f_df_pc, etetree, outgroup=''):
             r = node.children[1]
             lleaves = l.get_leaf_names()
             rleaves = r.get_leaf_names()
-            for h3 in [p for p in tree_mc.get_leaf_names() if p not in lleaves+rleaves and p!=outgroup]:
+            for h3 in [p for p in t.get_leaf_names() if p not in lleaves+rleaves and p!=outgroup]:
                 for p in lleaves:
                     for c in rleaves:
                         control_df = f_df_pc[(f_df_pc['p']==p)&(f_df_pc['c'].isin(lleaves))&(f_df_pc['h3']==h3)]
@@ -752,6 +752,6 @@ def get_f_reduced(f_df_pc, etetree, outgroup=''):
                             control = control_df.sort_values('|f|',ascending=False).iloc[0]
                             f_reduced.loc[(f_df_pc['p']==p)&(f_df_pc['c']==c)&(f_df_pc['h3']==h3),'|f|'] = \
                             f_reduced.loc[(f_df_pc['p']==p)&(f_df_pc['c']==c)&(f_df_pc['h3']==h3),'|f|'] -control['|f|']
-    return f_reduced, t
+    return f_reduced
 
 
