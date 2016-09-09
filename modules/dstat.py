@@ -701,18 +701,19 @@ def get_fstat_df(fs, Zs, quadruples):
     
     return fstat_df
 
-def get_partner_control_f(fstat_df):
+def get_partner_control_f(fstat_df, f='f', Z='Z'):
     """
     assumes a column f which has to be computed before
     also assumes a column Z
     """
     fstat_df = fstat_df.copy()
-    fstat_df.loc[:,'|f|'] = fstat_df['f'].apply(abs)
-    fstat_df.loc[:,'|Z|'] = fstat_df['Z'].apply(abs)
+
+    fstat_df.loc[:,'|f|'] = fstat_df[f].apply(abs)
+    fstat_df.loc[:,'|Z|'] = fstat_df[Z].apply(abs)
     #the one that shows geneflow with h3
-    fstat_df.loc[:,"c"] = fstat_df["h1"]*(fstat_df["f"]>0) + fstat_df["h2"]*(fstat_df["f"]<0)
+    fstat_df.loc[:,"c"] = fstat_df["h1"]*(fstat_df[f]>0) + fstat_df["h2"]*(fstat_df[f]<0)
     #the other
-    fstat_df.loc[:,"p"] = fstat_df["h1"]*(fstat_df["f"]<0) + fstat_df["h2"]*(fstat_df["f"]>0)
+    fstat_df.loc[:,"p"] = fstat_df["h1"]*(fstat_df[f]<0) + fstat_df["h2"]*(fstat_df[f]>0)
     return fstat_df[['c','p','h3','o','|f|','|Z|']]
 
 #------------------------------------------------------------------
@@ -727,7 +728,7 @@ def get_partner_control_f(fstat_df):
 #F-reduced
 #------------------------------------------------------------------
 
-def get_f_reduced(f_df_pc, etetree, outgroup):
+def get_f_reduced(f_df_pc, etetree, outgroup=''):
     t = copy.deepcopy(etetree)
     f_reduced = f_df_pc.copy()
     for node in  t.iter_descendants():
@@ -736,7 +737,7 @@ def get_f_reduced(f_df_pc, etetree, outgroup):
             r = node.children[1]
             lleaves = l.get_leaf_names()
             rleaves = r.get_leaf_names()
-            for h3 in [p for p in pops if p not in lleaves+rleaves and p!=outgroup]:
+            for h3 in [p for p in tree_mc.get_leaf_names() if p not in lleaves+rleaves and p!=outgroup]:
                 for p in lleaves:
                     for c in rleaves:
                         control_df = f_df_pc[(f_df_pc['p']==p)&(f_df_pc['c'].isin(lleaves))&(f_df_pc['h3']==h3)]
