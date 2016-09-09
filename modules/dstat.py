@@ -116,7 +116,7 @@ def get_dstat_snpwindow(af, quadruples, jackknife_window=2000, snp_window=None):
         #gc.collect
         if snp_window is not None:
             snp_window_sum = pd.rolling_sum(dstat,snp_window,
-                   min_periods=min_observation_fraction*snp_window,
+                   min_periods=0,#what should this be?
                        center=True).iloc[snp_window/2::snp_window].dropna()
             #gc.collect()
             snp_window_dstats.append(snp_window_sum.reset_index(level=1).values.tolist())
@@ -326,7 +326,7 @@ def plot_tree_next_to_matrix(tree, outgroup, ax=None):
         ax = plt.gca()
     tree_no_outgroup = copy.deepcopy(tree)
     tree_no_outgroup.prune(outgroup)
-    draw_tree(tree_no_outgroup,axes=ax0,do_show=False,label_func=lambda s:'')
+    draw_tree(tree_no_outgroup,axes=ax,do_show=False,label_func=lambda s:'')
     
     #ax0.spines['top'].set_visible(False)
     #ax0.spines['right'].set_visible(False)
@@ -336,6 +336,228 @@ def plot_tree_next_to_matrix(tree, outgroup, ax=None):
     plt.axis('off')
     
     return ax
+
+def draw_tree(tree, label_func=str, do_show=True, show_confidence=True,
+         # For power users
+         axes=None, branch_labels=None, *args, **kwargs):
+    """ HS: This function is taken from Bio.Phylo._utils
+        and modified to return axis and to plot 
+    
+    Plot the given tree using matplotlib (or pylab).
+
+    The graphic is a rooted tree, drawn with roughly the same algorithm as
+    draw_ascii.
+
+    Additional keyword arguments passed into this function are used as pyplot
+    options. The input format should be in the form of:
+    pyplot_option_name=(tuple), pyplot_option_name=(tuple, dict), or
+    pyplot_option_name=(dict).
+
+    Example using the pyplot options 'axhspan' and 'axvline':
+
+    >>> Phylo.draw(tree, axhspan=((0.25, 7.75), {'facecolor':'0.5'}),
+    ...     axvline={'x':'0', 'ymin':'0', 'ymax':'1'})
+
+    Visual aspects of the plot can also be modified using pyplot's own functions
+    and objects (via pylab or matplotlib). In particular, the pyplot.rcParams
+    object can be used to scale the font size (rcParams["font.size"]) and line
+    width (rcParams["lines.linewidth"]).
+
+    :Parameters:
+        label_func : callable
+            A function to extract a label from a node. By default this is str(),
+            but you can use a different function to select another string
+            associated with each node. If this function returns None for a node,
+            no label will be shown for that node.
+        do_show : bool
+            Whether to show() the plot automatically.
+        show_confidence : bool
+            Whether to display confidence values, if present on the tree.
+        axes : matplotlib/pylab axes
+            If a valid matplotlib.axes.Axes instance, the phylogram is plotted
+            in that Axes. By default (None), a new figure is created.
+        branch_labels : dict or callable
+            A mapping of each clade to the label that will be shown along the
+            branch leading to it. By default this is the confidence value(s) of
+            the clade, taken from the ``confidence`` attribute, and can be
+            easily toggled off with this function's ``show_confidence`` option.
+            But if you would like to alter the formatting of confidence values,
+            or label the branches with something other than confidence, then use
+            this option.
+    """
+    import matplotlib.collections as mpcollections
+
+    # Arrays that store lines for the plot of clades
+    horizontal_linecollections = []
+    vertical_linecollections = []
+
+    # Options for displaying branch labels / confidence
+    def conf2str(conf):
+        if int(conf) == conf:
+            return str(int(conf))
+        return str(conf)
+    if not branch_labels:
+        if show_confidence:
+            def format_branch_label(clade):
+                if hasattr(clade, 'confidences'):
+                    # phyloXML supports multiple confidences
+                    return '/'.join(conf2str(cnf.value)
+                                    for cnf in clade.confidences)
+                if clade.confidence:
+                    return conf2str(clade.confidence)
+                return None
+        else:
+            def format_branch_label(clade):
+                return None
+    elif isinstance(branch_labels, dict):
+        def format_branch_label(clade):
+            return branch_labels.get(clade)
+    else:
+        assert callable(branch_labels), \
+            "branch_labels must be either a dict or a callable (function)"
+        format_branch_label = branch_labels
+
+    # Layout
+
+    def get_x_positions(tree):
+        """Create a mapping of each clade to its horizontal position.
+
+        Dict of {clade: x-coord}
+        """
+        depths = tree.depths()
+        # If there are no branch lengths, assume unit branch lengths
+        if not max(depths.values()):
+            depths = tree.depths(unit_branch_lengths=True)
+        return depths
+
+    def get_y_positions(tree):
+        """Create a mapping of each clade to its vertical position.
+
+        Dict of {clade: y-coord}.
+        Coordinates are negative, and integers for tips.
+        """
+        maxheight = tree.count_terminals()
+        # Rows are defined by the tips
+        heights = dict((tip, maxheight - i)
+                       for i, tip in enumerate(reversed(tree.get_terminals())))
+
+        # Internal nodes: place at midpoint of children
+        def calc_row(clade):
+            for subclade in clade:
+                if subclade not in heights:
+                    calc_row(subclade)
+            # Closure over heights
+            heights[clade] = ((heights[clade.clades[0]] +
+                              heights[clade.clades[-1]]) / 2.0) #-1 #hs subtract -1
+            
+        if tree.root.clades:
+            calc_row(tree.root)
+        return {k:v-1 for (k,v) in heights.iteritems()} #HS -1
+
+    x_posns = get_x_positions(tree)
+    y_posns = get_y_positions(tree)
+    
+    # The function draw_clade closes over the axes object
+    if axes is None:
+        fig = plt.figure()
+        axes = fig.add_subplot(1, 1, 1)
+    elif not isinstance(axes, plt.matplotlib.axes.Axes):
+        raise ValueError("Invalid argument for axes: %s" % axes)
+
+    def draw_clade_lines(use_linecollection=False, orientation='horizontal',
+                         y_here=0, x_start=0, x_here=0, y_bot=0, y_top=0,
+                         color='black', lw='.1'):
+        """Create a line with or without a line collection object.
+
+        Graphical formatting of the lines representing clades in the plot can be
+        customized by altering this function.
+        """
+        if (use_linecollection is False and orientation == 'horizontal'):
+            axes.hlines(y_here, x_start, x_here, color=color, lw=lw)
+        elif (use_linecollection is True and orientation == 'horizontal'):
+            horizontal_linecollections.append(mpcollections.LineCollection(
+                [[(x_start, y_here), (x_here, y_here)]], color=color, lw=lw),)
+        elif (use_linecollection is False and orientation == 'vertical'):
+            axes.vlines(x_here, y_bot, y_top, color=color)
+        elif (use_linecollection is True and orientation == 'vertical'):
+            vertical_linecollections.append(mpcollections.LineCollection(
+                [[(x_here, y_bot), (x_here, y_top)]], color=color, lw=lw),)
+
+    def draw_clade(clade, x_start, color, lw):
+        """Recursively draw a tree, down from the given clade."""
+        x_here = x_posns[clade]
+        y_here = y_posns[clade]
+        # phyloXML-only graphics annotations
+        if hasattr(clade, 'color') and clade.color is not None:
+            color = clade.color.to_hex()
+        if hasattr(clade, 'width') and clade.width is not None:
+            lw = clade.width * plt.rcParams['lines.linewidth']
+        # Draw a horizontal line from start to here
+        draw_clade_lines(use_linecollection=True, orientation='horizontal',
+                         y_here=y_here, x_start=x_start, x_here=x_here, color=color, lw=lw)
+        # Add node/taxon labels
+        label = label_func(clade)
+        if label not in (None, clade.__class__.__name__):
+            axes.text(x_here, y_here, ' %s' %
+                      label, verticalalignment='center')
+        # Add label above the branch (optional)
+        conf_label = format_branch_label(clade)
+        if conf_label:
+            axes.text(0.5 * (x_start + x_here), y_here, conf_label,
+                      fontsize='small', horizontalalignment='center')
+        if clade.clades:
+            # Draw a vertical line connecting all children
+            y_top = y_posns[clade.clades[0]] #- 1
+            y_bot = y_posns[clade.clades[-1]] #- 1
+            # Only apply widths to horizontal lines, like Archaeopteryx
+            draw_clade_lines(use_linecollection=True, orientation='vertical',
+                             x_here=x_here, y_bot=y_bot, y_top=y_top, color=color, lw=lw)
+            # Draw descendents
+            for child in clade:
+                draw_clade(child, x_here, color, lw)
+                
+                
+    draw_clade(tree.root, 0, 'k', plt.rcParams['lines.linewidth'])
+
+    # If line collections were used to create clade lines, here they are added
+    # to the pyplot plot.
+    for i in horizontal_linecollections:
+        axes.add_collection(i)
+    for i in vertical_linecollections:
+        axes.add_collection(i)
+
+    # Aesthetics
+
+    if hasattr(tree, 'name') and tree.name:
+        axes.set_title(tree.name)
+    axes.set_xlabel('branch length')
+    axes.set_ylabel('taxa')
+    # Add margins around the tree to prevent overlapping the axes
+    xmax = max(x_posns.values())
+    axes.set_xlim(-0.05 * xmax, 1.25 * xmax)
+    # Also invert the y-axis (origin at the top)
+    # Add a small vertical margin, but avoid including 0 and N+1 on the y axis
+    #axes.set_ylim(max(y_posns.values()) + 0.8, 0.2)
+    axes.set_ylim(0,max(y_posns.values()))
+
+    # Parse and process key word arguments as pyplot options
+    for key, value in kwargs.items():
+        try:
+            # Check that the pyplot option input is iterable, as required
+            [i for i in value]
+        except TypeError:
+            raise ValueError('Keyword argument "%s=%s" is not in the format '
+                             'pyplot_option_name=(tuple), pyplot_option_name=(tuple, dict),'
+                             ' or pyplot_option_name=(dict) '
+                             % (key, value))
+        if isinstance(value, dict):
+            getattr(plt, str(key))(**dict(value))
+        elif not (isinstance(value[0], tuple)):
+            getattr(plt, str(key))(*value)
+        elif (isinstance(value[0], tuple)):
+            getattr(plt, str(key))(*value[0], **dict(value[1]))
+    return axes   
+
 
 
 #-----------------------------------------------------------------
@@ -355,7 +577,7 @@ def get_fstat_snpwindow_chrom(chrom, callset, path, populations,
     fstats, jackknife_window_fstats = get_fstat_snpwindow(gen_df, quadruples, populations,
                                                          controlsamples_h3=controlsamples_h3,
                                                          controlsamples_h2=controlsamples_h2,
-                                                         jackknife_window=2000)
+                                                         jackknife_window=jackknife_window)
     return fstats, jackknife_window_fstats
 
 def get_fstat_snpwindow(gen_df, quadruples, populations, controlsamples_h3=1,
@@ -378,7 +600,7 @@ def get_fstat_snpwindow(gen_df, quadruples, populations, controlsamples_h3=1,
         fstat = pd.DataFrame(fstat)
         for i in range(controlsamples_h3):
             n_samples = len(populations[h3])
-            assert n_samples > 1
+            assert n_samples > 1, "cannot split p3 {}:{}".format(h3,populations[h3])
             s0 = list(np.random.choice(populations[h3], n_samples/2, replace=False))
             s1 = [s for s in populations[h3] if s not in s0]
             denom = get_numerator(gen_df, (h1,h2,h3,o),
@@ -457,5 +679,78 @@ def reduce_fstat_snpwindow(result, controlsamples_h3, controlsamples_h2):
         Zs.append([list(zscores[:controlsamples_h3]),list(zscores[controlsamples_h3:])])
 
     return fs, Zs
+
+def get_fstat_df(fs, Zs, quadruples):
+    """
+    Takes lists of lists of f values, Z values, and list of name quadruples.
+    """
+    d = {'h1':[t[0] for t in quadruples],
+                 'h2':[t[1] for t in quadruples],
+                 'h3':[t[2] for t in quadruples],
+                 'o':[t[3] for t in quadruples]}
+    d.update({'f_h3c_'+str(i):[fs[t][0][i] for t in range(len(quadruples))] for i in range(len(fs[0][0]))})
+    
+    d.update({'Z_h3c_'+str(i):[Zs[t][0][i] for t in range(len(quadruples))] for i in range(len(fs[0][0]))})
+    
+    d.update({'f_h2c_'+str(i):[fs[t][1][i] for t in range(len(quadruples))] for i in range(len(fs[0][1]))})
+    d.update({'Z_h2c_'+str(i):[Zs[t][1][i] for t in range(len(quadruples))] for i in range(len(fs[0][1]))})
+    try:
+        fstat_df = pd.DataFrame(d)
+    except ValueError, e:
+        raise e
+    
+    return fstat_df
+
+def get_partner_control_f(fstat_df):
+    """
+    assumes a column f which has to be computed before
+    also assumes a column Z
+    """
+    fstat_df = fstat_df.copy()
+    fstat_df.loc[:,'|f|'] = fstat_df['f'].apply(abs)
+    fstat_df.loc[:,'|Z|'] = fstat_df['Z'].apply(abs)
+    #the one that shows geneflow with h3
+    fstat_df.loc[:,"c"] = fstat_df["h1"]*(fstat_df["f"]>0) + fstat_df["h2"]*(fstat_df["f"]<0)
+    #the other
+    fstat_df.loc[:,"p"] = fstat_df["h1"]*(fstat_df["f"]<0) + fstat_df["h2"]*(fstat_df["f"]>0)
+    return fstat_df[['c','p','h3','o','|f|','|Z|']]
+
+#------------------------------------------------------------------
+#Functions to plot f-statistics results
+#------------------------------------------------------------------
+
+
+
+
+
+#------------------------------------------------------------------
+#F-reduced
+#------------------------------------------------------------------
+
+def get_f_reduced(f_df_pc, etetree, outgroup):
+    t = copy.deepcopy(etetree)
+    f_reduced = f_df_pc.copy()
+    for node in  t.iter_descendants():
+        if node.children:
+            l = node.children[0]
+            r = node.children[1]
+            lleaves = l.get_leaf_names()
+            rleaves = r.get_leaf_names()
+            for h3 in [p for p in pops if p not in lleaves+rleaves and p!=outgroup]:
+                for p in lleaves:
+                    for c in rleaves:
+                        control_df = f_df_pc[(f_df_pc['p']==p)&(f_df_pc['c'].isin(lleaves))&(f_df_pc['h3']==h3)]
+                        if len(control_df):
+                            control = control_df.sort_values('|f|',ascending=False).iloc[0]
+                            f_reduced.loc[(f_df_pc['p']==p)&(f_df_pc['c']==c)&(f_df_pc['h3']==h3),'|f|'] = \
+                            f_reduced.loc[(f_df_pc['p']==p)&(f_df_pc['c']==c)&(f_df_pc['h3']==h3),'|f|'] -control['|f|']
+                for p in rleaves:
+                    for c in lleaves:
+                        control_df = f_df_pc[(f_df_pc['p']==p)&(f_df_pc['c'].isin(rleaves))&(f_df_pc['h3']==h3)]
+                        if len(control_df):
+                            control = control_df.sort_values('|f|',ascending=False).iloc[0]
+                            f_reduced.loc[(f_df_pc['p']==p)&(f_df_pc['c']==c)&(f_df_pc['h3']==h3),'|f|'] = \
+                            f_reduced.loc[(f_df_pc['p']==p)&(f_df_pc['c']==c)&(f_df_pc['h3']==h3),'|f|'] -control['|f|']
+    return f_reduced, t
 
 
