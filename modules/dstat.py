@@ -585,11 +585,12 @@ def draw_tree(tree, label_func=str, do_show=True, show_confidence=True,
 # Functions to calculate f-statistics (admixture fraction) and jackknife
 #------------------------------------------------------------------
 
-def get_fstat_snpwindow_map_reduce(fn, populations, quadruples,
-                                   controlsamples_h3=1, controlsamples_h2=0,
-                                   jackknife_window=10000,
-                                   chunksize=50000, map_fun=None,
-                                   get_result_fun=None):
+def get_fstat_snpwindow_chunk(fn, populations, quadruples,
+                              controlsamples_h3=1, controlsamples_h2=0,
+                              jackknife_window=10000,
+                              chunksize=50000, chrom=None,
+                              apply_fun=None,
+                              get_result_fun=None):
     def get_fstat_chunk(chunk):
         return get_fstat_snpwindow(chunk, quadruples, populations,
                                    controlsamples_h3=controlsamples_h3,
@@ -598,17 +599,18 @@ def get_fstat_snpwindow_map_reduce(fn, populations, quadruples,
 
     samples = [s for vs in populations.values() for s in vs]
 
-    results = vp.map_reduce_geno(fn, get_fstat_chunk, samples=samples,
-                                 chunksize=chunksize, map_fun=map_fun,
+    results = vp.map_reduce_geno(fn, get_fstat_chunk, chrom=chrom,
+                                 samples=samples,
+                                 chunksize=chunksize, apply_fun=apply_fun,
                                  get_result_fun=get_result_fun,
                                  reduce_fun=None)
-    print results
+    # print results
 
-    fs, Zs = reduce_fstat_snpwindow(results,
-                                    controlsamples_h3=controlsamples_h3,
-                                    controlsamples_h2=controlsamples_h2)
-    fstat_df = get_fstat_df(fs, Zs, quadruples)
-    return fstat_df
+    # fs, Zs = reduce_fstat_snpwindow(results,
+    #                                 controlsamples_h3=controlsamples_h3,
+    #                                 controlsamples_h2=controlsamples_h2)
+    # fstat_df = get_fstat_df(fs, Zs, quadruples)
+    return results
 
 
 def get_fstat_snpwindow_chrom(chrom, callset, path, populations,

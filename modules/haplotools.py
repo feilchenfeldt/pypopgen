@@ -18,8 +18,11 @@ def pairwise_diff_mat(df):
     Uses numpy matrix multiplication.
     """
     cols = df.columns
-    diff = pairwise_diff_numpy(df.values)
-    gc.collect()
+    if len(df):
+        diff = pairwise_diff_numpy(df.values)
+        gc.collect()
+    else:
+        diff = 0
     return pd.DataFrame(diff, index=cols, columns=cols)
 
 
@@ -61,6 +64,8 @@ def get_pairwise_diff(fn, samples=None, chrom=None, start=None, end=None,
         if dropna:
             hap_chunk.dropna(axis=0, inplace=True)
         dm = pairwise_diff_mat(hap_chunk)
+        del hap_chunk
+        gc.collect()
         return dm
 
     def reduce_fun(pwds):
