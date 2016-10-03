@@ -1689,6 +1689,41 @@ class AddAncestralFasta(LineWriteParser):
 #        self.out_file.write("\t".join(sline)+'\n')
 
 
+class AddVariantsFromFasta(LineWriteParser):
+    """
+    Add variants from fasta to vcf.
+    This is useful if one wants to annotate
+    a vcf that includes ancestral alleles
+    """
+    args = {'fasta':{'required':True,
+                     'type':argparse.FileType('r'),
+                     'help':'Filepath of fasta with from which '
+                            'variants will be added.'},
+              'out_file':{'required':True,
+                                 'type':argparse.FileType('w'),
+                           'help':"Filepath to write output vcf to."}}
+    def __init__(self,**kwa):
+        from pyfasta import Fasta
+        self.fasta = Fasta(self.fasta.name)
+
+    def header_fun(self, line):
+        self.out_file.write(line)
+
+
+    def parse_fun(self, sline):
+        #print "Hallo"
+        ref = sline[3]
+        alts  = sline[4].split(',')
+        aa = self.fasta[sline[0]][int(sline[1])-1].upper()
+
+        if aa in nucleotides and aa != ref and len(ref)==1:
+            if alts[0] in no_var:
+                alts[0] = aa
+            sline[4] = ",".join(alts)
+            logging.debug("Adding macaque variant {} in line {}.".format(aa,
+                                                                ":".join(sline[:2])))
+            logging.debug("\t".join(sline[:8]))
+        self.out_file.write("\t".join(sline)+'\n')
 
 
 class SNPEFFParser(Parser):
