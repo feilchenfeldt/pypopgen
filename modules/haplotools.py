@@ -46,6 +46,7 @@ def pw_diff_to_individual(hap_pairwise_diff):
 
 
 def get_pairwise_diff(fn, samples=None, chrom=None, start=None, end=None,
+                      add_ref = False,
                       dropna=True, chunksize=50000, apply_fun=None,
                       get_result_fun=None):
     """
@@ -56,6 +57,9 @@ def get_pairwise_diff(fn, samples=None, chrom=None, start=None, end=None,
     assert dropna, "Na handling not implemented, please use dropna=True"
 
     def get_pwd(chunk0, chunk1):
+        if add_ref:
+            chunk0.loc[:, "ref"] = 0
+            chunk1.loc[:, "ref"] = 0
         chunk0.columns = pd.MultiIndex.from_arrays(
             [chunk0.columns, [0] * len(chunk0.columns)])
         chunk1.columns = pd.MultiIndex.from_arrays(
