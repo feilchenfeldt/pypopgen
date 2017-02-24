@@ -23,21 +23,40 @@ def pairwise_diff_mat(df):
         gc.collect()
     else:
         diff = 0
+        raise Exception('BLABLA')
     return pd.DataFrame(diff, index=cols, columns=cols)
 
 
 def pairwise_diff_numpy(gen_arr):
     """
-    ATTENTION: This does not handle nans
-    for missing data implement a mask 
-    Setting missing to zero beforehand would be wrong.
+    ATTENTION: This mask missing data, but when calculating
+    pi per site this masking should be taking into account.
+    TODO: calculate pi/snp here and then multiply by n_snp or so.
     """
-    n = np.dot(gen_arr.T, np.logical_not(gen_arr)) + \
-        np.dot(np.logical_not(gen_arr.T), gen_arr)
+    gen_arr = np.ma.array(gen_arr, mask=np.isnan(gen_arr))
+
+    n = np.ma.dot(gen_arr.T, np.logical_not(gen_arr)) + \
+        np.ma.dot(np.logical_not(gen_arr.T), gen_arr)
     return n
 
 
+def pw_diff_to_individual_flat(hap_pairwise_diff):
+    """
+    columns index is flat: sample_name_h0, ...h1
+    """
+    hap_to_dip = {s:s.rsplit('_',1)[0] for s in hap_pairwise_diff.columns}
+    ind_pairwise_diff = hap_pairwise_diff.groupby(hap_to_dip).sum().groupby(hap_to_dip,axis=1).sum()
+    denum = np.ones(ind_pairwise_diff.shape) * 4.
+    np.fill_diagonal(denum, 2.)
+    return ind_pairwise_diff / denum
+
+
 def pw_diff_to_individual(hap_pairwise_diff):
+    """
+    columns index is multiindex (sample_name, haplotype)
+    Depriciated: in the future, just use flat column index, 
+    with sample_name_h0, ...h1
+    """
     ind_pairwise_diff = hap_pairwise_diff.sum(
         axis=1, level=0).sum(axis=0, level=0)
     denum = np.ones(ind_pairwise_diff.shape) * 4.
@@ -52,9 +71,10 @@ def get_pairwise_diff(fn, samples=None, chrom=None, start=None, end=None,
     """
     Read haplotypes from specific region tabixed vcf.gz file
     and calculate pairwise differences.
-
+    
+    dropna ... drops sites where any sample is NA, otherwise they are just 
+            masked for given individual
     """
-    assert dropna, "Na handling not implemented, please use dropna=True"
 
     def get_pwd(chunk0, chunk1):
         if add_ref:
@@ -76,7 +96,8 @@ def get_pairwise_diff(fn, samples=None, chrom=None, start=None, end=None,
         dm = reduce(lambda a, b: a + b, pwds)
         dm_ind = pw_diff_to_individual(dm)
         return dm_ind
-
+    
+    
     dm = vp.map_reduce_haplo(fn, get_pwd, samples_h0=samples,
                              samples_h1=samples, chrom=chrom,
                              start=start, end=end,
