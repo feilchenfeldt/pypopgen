@@ -1,10 +1,13 @@
 import os
 import copy
 import itertools
+import StringIO
 import numpy as np
 import pandas as pd
 import matplotlib as mpl
-from matplotlib import pyplot as plt
+#from matplotlib import pyplot as plt
+from Bio import Phylo
+import ete3
 
 import vcfpandas as vp
 
@@ -50,8 +53,8 @@ def consistent_with_tree2(in_tree, h1, h2, h3, o):
             tree.prune(target=tc.name)
     if get_n_nodes(tree, h1, h2) < get_n_nodes(tree, h2, h3) and \
             get_n_nodes(tree, h1, h2) < get_n_nodes(tree, h1, h3) and \
-            get_n_nodes(tree, h2, h3) < get_n_nodes(tree, h2, o) and \
-            get_n_nodes(tree, h1, h3) < get_n_nodes(tree, h1, o):
+            get_n_nodes(tree, h2, h3) <= get_n_nodes(tree, h2, o) and \
+            get_n_nodes(tree, h1, h3) <= get_n_nodes(tree, h1, o):
         return True
     else:
         return False
@@ -72,7 +75,11 @@ def prune_tree_to_populations(in_tree, population_dict, prune_missing=True):
             print "could not find clade", names[0]
             print [i for i in tree.find_clades(names[0])]
         for n in names[1:]:
-            tree.prune(target=n)
+            try:
+                tree.prune(target=n)
+            except ValueError, e:
+                print n
+                raise e
     if prune_missing:
         for clade in tree.get_terminals():
             if clade.name not in population_dict.keys():
@@ -249,7 +256,7 @@ def plot_bubble_chart0(d, z, max_control, order=None, size_factor=10000, ax=None
     mpl.rcParams['font.size'] = 16
 
     if ax is None:
-        ax = plt.gca()
+        ax = mpl.pyplot.gca()
     stat = '|dstat|'
 
     if order is not None:
@@ -263,7 +270,7 @@ def plot_bubble_chart0(d, z, max_control, order=None, size_factor=10000, ax=None
         max_control = max_control.T
         z = z.T
 
-    ax = plt.gca()
+    ax = mpl.pyplot.gca()
     tick_locations = np.arange(0, len(d) + 0.5)
     ax.set_xticks(tick_locations)
     ax.set_yticks(tick_locations)
@@ -299,21 +306,21 @@ def plot_bubble_chart0(d, z, max_control, order=None, size_factor=10000, ax=None
                         text = max_control.iloc[y, x][3:6]
                     elif text == "A_c":
                         text = max_control.iloc[y, x].split('_')[2][:3]
-                    plt.annotate(text, (x, y), horizontalalignment='center',
+                    mpl.pyplot.annotate(text, (x, y), horizontalalignment='center',
                                  verticalalignment='center',
                                  color='k' if z_score < half_z else 'w', fontsize=16 * np.sqrt(size / 0.13 * size_factor / 10000.))
                 except TypeError:
                     pass
 
-    jet = cm = plt.get_cmap('Blues')
+    jet = cm = mpl.pyplot.get_cmap('Blues')
     cNorm = mpl.colors.Normalize(vmin=min(z_scores), vmax=max(z_scores))
 
     norm_sizes = np.array(sizes) * size_factor
 
-    bubbles = plt.scatter(np.array(x_vals), np.array(y_vals),
+    bubbles = mpl.pyplot.scatter(np.array(x_vals), np.array(y_vals),
                           c=z_scores, cmap=jet, norm=cNorm, s=norm_sizes)
 
-    cb = plt.colorbar(label="| Z-score |")
+    cb = mpl.pyplot.colorbar(label="| Z-score |")
     cb.solids.set_rasterized(True)
     cb.ax.yaxis.labelpad = 10
 
@@ -323,7 +330,7 @@ def plot_bubble_chart0(d, z, max_control, order=None, size_factor=10000, ax=None
     ax.spines['left'].set_visible(False)
     ax.tick_params(axis=u'both', which=u'both', length=0)
 
-    plt.title(
+    mpl.pyplot.title(
         "Patterson's D {:.2f}% - {:.2f}%".format(d.min().min() * 100, d.max().max() * 100))
 
     return ax
@@ -342,7 +349,7 @@ def get_bubble_plot_input(prefix, name, outgroup, tree):
 
 def plot_tree_next_to_matrix(tree, outgroup, ax=None):
     if ax is None:
-        ax = plt.gca()
+        ax = mpl.pyplot.gca()
     tree_no_outgroup = copy.deepcopy(tree)
     tree_no_outgroup.prune(outgroup)
     draw_tree(tree_no_outgroup, axes=ax,
@@ -353,7 +360,7 @@ def plot_tree_next_to_matrix(tree, outgroup, ax=None):
     # ax0.spines['bottom'].set_visible(False)
     # ax0.spines['left'].set_visible(False)
     #ax0.tick_params(axis=u'both', which=u'both',length=0)
-    plt.axis('off')
+    mpl.pyplot.axis('off')
 
     return ax
 
@@ -480,9 +487,9 @@ def draw_tree(tree, label_func=str, do_show=True, show_confidence=True,
 
     # The function draw_clade closes over the axes object
     if axes is None:
-        fig = plt.figure()
+        fig = mpl.pyplot.figure()
         axes = fig.add_subplot(1, 1, 1)
-    elif not isinstance(axes, plt.matplotlib.axes.Axes):
+    elif not isinstance(axes, mpl.pyplot.matplotlib.axes.Axes):
         raise ValueError("Invalid argument for axes: %s" % axes)
 
     def draw_clade_lines(use_linecollection=False, orientation='horizontal',
@@ -512,7 +519,7 @@ def draw_tree(tree, label_func=str, do_show=True, show_confidence=True,
         if hasattr(clade, 'color') and clade.color is not None:
             color = clade.color.to_hex()
         if hasattr(clade, 'width') and clade.width is not None:
-            lw = clade.width * plt.rcParams['lines.linewidth']
+            lw = clade.width * mpl.pyplot.rcParams['lines.linewidth']
         # Draw a horizontal line from start to here
         draw_clade_lines(use_linecollection=True, orientation='horizontal',
                          y_here=y_here, x_start=x_start, x_here=x_here, color=color, lw=lw)
@@ -537,7 +544,7 @@ def draw_tree(tree, label_func=str, do_show=True, show_confidence=True,
             for child in clade:
                 draw_clade(child, x_here, color, lw)
 
-    draw_clade(tree.root, 0, 'k', plt.rcParams['lines.linewidth'])
+    draw_clade(tree.root, 0, 'k', mpl.pyplot.rcParams['lines.linewidth'])
 
     # If line collections were used to create clade lines, here they are added
     # to the pyplot plot.
@@ -571,13 +578,75 @@ def draw_tree(tree, label_func=str, do_show=True, show_confidence=True,
                              ' or pyplot_option_name=(dict) '
                              % (key, value))
         if isinstance(value, dict):
-            getattr(plt, str(key))(**dict(value))
+            getattr(mpl.pyplot. str(key))(**dict(value))
         elif not (isinstance(value[0], tuple)):
-            getattr(plt, str(key))(*value)
+            getattr(mpl.pyplot. str(key))(*value)
         elif (isinstance(value[0], tuple)):
-            getattr(plt, str(key))(*value[0], **dict(value[1]))
+            getattr(mpl.pyplot. str(key))(*value[0], **dict(value[1]))
     return axes
 
+def plot_node_tree(tree, ax=None, x0=0,y0=0, plot_leaf_names=True, em=0.7,fontsize=12):
+    if ax is None:
+        ax = mpl.pyplot.gca()
+    x = x0
+    y = y0
+    maxletters = max([len(n) for n in tree.get_leaf_names()])
+    if not plot_leaf_names:
+        em = 0
+    
+    
+    for node in tree.iter_descendants('preorder'):
+        visited.append(node)
+
+        x = node.get_distance(node.get_tree_root(),topology_only=True)
+
+
+        hline, = ax.plot([x,x+1], [y,y], '-',color='k')
+
+        try:
+            rows_below = len(node.get_descendants())
+        except IndexError:
+            rows_below = 0
+
+        if node.is_leaf():
+
+
+            nletters = len(node.name)
+            if plot_leaf_names:
+                ax.annotate(node.name,xy=(depth+em*maxletters,y),fontsize=12, va='center',ha='right')
+            hline2, = ax.plot([x+1,depth+em*(maxletters-nletters)], [y,y], '-',color='k')
+        else:
+            #print rows_below
+            try:
+                sister = node.get_sisters()[0]
+                if sister not in visited:
+                    vline, = ax.plot([x,x], [y,y-rows_below-1], '-',color='k')
+            except IndexError:
+                pass
+
+            hline2, = ax.plot([x+1,depth++em*maxletters], [y,y], ls='dotted',color='k')
+            vline2, = ax.plot([x+1,x+1], [y,y-2], '-',color='k')
+
+        y = y - 1
+
+    mpl.pyplot.axis('off')
+    
+    return ax
+
+def phylo_to_ete(phylo_tree):
+    treeio = StringIO.StringIO()
+    Phylo.write(phylo_tree, treeio, format='newick')
+    ete_tree = ete3.Tree(treeio.getvalue())
+    #make sure no additional outer quotes in names with whitespace
+    for t in ete_tree.get_leaves():
+            t.name = t.name.strip("' ")
+    return ete_tree
+
+
+def phylo_from_str(tree_str):
+    treeio = StringIO.StringIO(tree_str)
+    phylo_tree = Phylo.read(treeio, format='newick')
+    return phylo_tree
 
 #-----------------------------------------------------------------
 
@@ -585,32 +654,223 @@ def draw_tree(tree, label_func=str, do_show=True, show_confidence=True,
 # Functions to calculate f-statistics (admixture fraction) and jackknife
 #------------------------------------------------------------------
 
-def get_fstat_snpwindow_chunk(fn, populations, quadruples,
+def get_fstat_chunkwindow(fn, populations, quadruples,
                               controlsamples_h3=1, controlsamples_h2=0,
-                              jackknife_window=10000,
+                              chunksize=50000, chrom=None,
+                              apply_fun=None,
+                              get_result_fun=None, use_haplotypes=False):
+    
+    samples = [s for vs in populations.values() for s in vs]
+    
+    if not use_haplotypes:
+
+        def get_fstat_chunk(chunk):
+            return fstat_chunk(chunk, quadruples, populations,
+                                       controlsamples_h3=controlsamples_h3,
+                                       controlsamples_h2=controlsamples_h2)
+     
+        results = vp.map_reduce_geno(fn, get_fstat_chunk, chrom=chrom,
+                                     samples=samples,
+                                     chunksize=chunksize, apply_fun=apply_fun,
+                                     get_result_fun=get_result_fun,
+                                     reduce_fun=None)
+    else:
+
+        hap_populations = {k:[s for n in v for s in (n + '_h0',n + '_h1')] for k, v in populations.iteritems()} 
+        def get_fstat_chunk(chunk0, chunk1):
+            chunk0.columns =[n+'_h0' for n in chunk0.columns] 
+            chunk1.columns =[n+'_h1' for n in chunk1.columns]
+            return fstat_chunk(pd.concat([chunk0,chunk1], axis=1), quadruples, hap_populations,
+                                       controlsamples_h3=controlsamples_h3,
+                                       controlsamples_h2=controlsamples_h2)
+
+        results = vp.map_reduce_haplo(fn, get_fstat_chunk, chrom=chrom,
+                                     samples_h0=samples,
+                                     samples_h1=samples,
+                                     chunksize=chunksize, apply_fun=apply_fun,
+                                     get_result_fun=get_result_fun,
+                                     reduce_fun=None)
+  
+    return results
+
+
+def get_fstat_chunkwindow_hap(fn, populations, quadruples,
+                              controlsamples_h3=1, controlsamples_h2=0,
                               chunksize=50000, chrom=None,
                               apply_fun=None,
                               get_result_fun=None):
-    def get_fstat_chunk(chunk):
-        return get_fstat_snpwindow(chunk, quadruples, populations,
+    
+    hap_populations = {k:[s for n in v for s in (n + '_h0',n + '_h1')] for k, v in populations.iteritems()} 
+    def get_fstat_chunk(chunk0, chunk1):
+        chunk0.columns =[n+'_h0' for n in chunk0.columns] 
+        chunk1.columns =[n+'_h1' for n in chunk1.columns]
+        return fstat_chunk(pd.concat([chunk0,chunk1], axis=1), quadruples, hap_populations,
                                    controlsamples_h3=controlsamples_h3,
-                                   controlsamples_h2=controlsamples_h2,
-                                   jackknife_window=jackknife_window)
+                                   controlsamples_h2=controlsamples_h2)
 
     samples = [s for vs in populations.values() for s in vs]
 
-    results = vp.map_reduce_geno(fn, get_fstat_chunk, chrom=chrom,
-                                 samples=samples,
+    results = vp.map_reduce_haplo(fn, get_fstat_chunk, chrom=chrom,
+                                 samples_h0=samples,
+                                 samples_h1=samples,
                                  chunksize=chunksize, apply_fun=apply_fun,
                                  get_result_fun=get_result_fun,
                                  reduce_fun=None)
-    # print results
-
-    # fs, Zs = reduce_fstat_snpwindow(results,
-    #                                 controlsamples_h3=controlsamples_h3,
-    #                                 controlsamples_h2=controlsamples_h2)
-    # fstat_df = get_fstat_df(fs, Zs, quadruples)
     return results
+
+def fstat_chunk(gen_df, quadruples, populations, controlsamples_h3=1,
+                        controlsamples_h2=0):
+    """
+    Output:
+    fstats ... List of lists of shape:
+    (n_chunks, len(quadruples), 1 + controlsamples_h3 + controlsamples_h2)
+    
+    1st level: quadruples
+    2nd lebel:  List of [numerator, denominator_0, ..., denominator_i,...] 
+                  for i in controllsamples_h3, controllsamples_h3,
+    """
+    
+
+    assert controlsamples_h3 > 0 or controlsamples_h2 > 0
+
+    fstats = []
+
+    for j, (h1, h2, h3, o) in enumerate(quadruples):
+        fstat = get_numerator(gen_df, (h1, h2, h3, o),
+                              [populations[p] for p in (h1, h2, h3, o)])
+        fstat.name = 'num'
+        fstat = pd.DataFrame(fstat)
+        for i in range(controlsamples_h3):
+            n_samples = len(populations[h3])
+            assert n_samples > 1, "cannot split p3 {}:{}. Consider use_haplotypes=True.".format(
+                h3, populations[h3])
+            s0 = list(np.random.choice(
+                populations[h3], n_samples / 2, replace=False))
+            s1 = [s for s in populations[h3] if s not in s0]
+            denom = get_numerator(gen_df, (h1, h2, h3, o),
+                                  [populations[h1], s0, s1, populations[o]])
+            denom.name = 'denom_h3c_' + str(i)
+            fstat = fstat.join(denom, how='outer')
+        for i in range(controlsamples_h2):
+            n_samples = len(populations[h2])
+            assert n_samples > 1, "cannot split p3 {}:{}".format(
+                h3, populations[h3])
+            s0 = list(np.random.choice(
+                populations[h2], n_samples / 2, replace=False))
+            s1 = [s for s in populations[h2] if s not in s0]
+            denom = get_numerator(gen_df, (h1, h2, h3, o),
+                                  [populations[h1], s0, s1, populations[o]])
+            denom.name = 'denom_h2c_' + str(i)
+            fstat = fstat.join(denom, how='outer')
+        # attention there seems to be a strange bug in pandas
+        # so that df.sum()['a'] != df['a'].sum()
+        fstats.append(list(fstat.apply(np.nansum, axis=0)))
+
+
+    return fstats
+
+
+
+
+def reduce_fstat_chunks(chunk_fstats):
+    """
+    """
+
+    def divide_numdenom(numdenom):
+        return [numdenom[0] * 1. / c for c in numdenom[1:]]
+    
+    def calc_f_jackknife(chunk_fstats,jackknife_index=-np.inf):
+        """
+        leave jackknife_index out
+        """
+        numdenom = chunk_fstats[np.arange(len(chunk_fstats)) != jackknife_index].sum(axis=0)
+        fs = np.apply_along_axis(divide_numdenom,1,numdenom)
+        return fs
+
+    chunk_fstats = np.array(chunk_fstats)
+
+    fs = calc_f_jackknife(chunk_fstats)
+
+    jackknife_estimates = [calc_f_jackknife(chunk_fstats,i) for i in range(len(chunk_fstats))]
+
+    zscores = fs / \
+            (np.std(jackknife_estimates, axis=0, ddof=1)
+             * np.sqrt(len(jackknife_estimates)))
+
+    return fs, zscores
+
+
+def reduce_fstat_map(result):
+    r = reduce(lambda a,b: a+b, result)
+    return reduce_fstat_chunks(r)
+
+
+def get_fstat_df_chunk(fs, Zs, quadruples, controlsamples_h3, controlsamples_h2):
+    """
+    Takes lists of lists of f values, Z values, and list of name quadruples.
+    """
+    d = {'h1': [t[0] for t in quadruples],
+         'h2': [t[1] for t in quadruples],
+         'h3': [t[2] for t in quadruples],
+         'o': [t[3] for t in quadruples]}
+    d.update({'f_h3c_' + str(i): [fs[t][i]
+                                  for t in range(len(quadruples))] for i in range(controlsamples_h3)})
+
+    d.update({'Z_h3c_' + str(i): [Zs[t][i]
+                                  for t in range(len(quadruples))] for i in range(controlsamples_h3)})
+
+    d.update({'f_h2c_' + str(i): [fs[t][controlsamples_h3+i]
+                                  for t in range(len(quadruples))] for i in range(controlsamples_h2)})
+    d.update({'Z_h2c_' + str(i): [Zs[t][controlsamples_h3+i]
+                                  for t in range(len(quadruples))] for i in range(controlsamples_h2)})
+    try:
+        fstat_df = pd.DataFrame(d)
+    except ValueError, e:
+        raise e
+
+    return fstat_df
+
+
+def reduce_fstat_snpwindow(result, controlsamples_h3, controlsamples_h2):
+
+    def fs_from_array(jackknife_arr):
+        numdenom_from_jackknife = np.sum(jackknife_arr, axis=0)
+        fs_from_jackknife = [numdenom_from_jackknife[0]
+                             * 1. / c for c in numdenom_from_jackknife[1:]]
+        return fs_from_jackknife
+
+    fs = []
+    Zs = []
+    # iterate over index of h1,h2,h3,o tuples
+    for tpl_ix in range(len(result[0][0])):
+
+        numdenom = np.sum(np.array([result[i][0][tpl_ix]
+                                    for i in range(len(result))]), axis=0)
+        fs0 = [numdenom[0] * 1. / c for c in numdenom[1:]]
+        assert len(fs0) == (controlsamples_h3 + controlsamples_h2)
+        fs_h3c = fs0[:controlsamples_h3]
+        fs_h2c = fs0[controlsamples_h3:]
+
+        fs.append([fs_h3c, fs_h2c])
+
+        jackknife_arr = np.concatenate([result[i][1][tpl_ix] for i in range(
+            len(result)) if result[i][1][tpl_ix]])[:, 1:]
+
+        fs_from_jackknife = fs_from_array(jackknife_arr)
+
+        jackknife_estimates = [fs_from_array(jackknife_arr[np.arange(jackknife_arr.shape[0]) != i])
+                               for i in range(jackknife_arr.shape[0])]
+
+        # return fs_from_jackknife, jackknife_estimates
+        print "Number of jackknife estimates for quadruple {}:".format(tpl_ix), len(jackknife_estimates)
+
+        zscores = fs_from_jackknife / \
+            (np.std(jackknife_estimates, axis=0, ddof=1)
+             * np.sqrt(len(jackknife_estimates)))
+        Zs.append([list(zscores[:controlsamples_h3]),
+                   list(zscores[controlsamples_h3:])])
+
+    return fs, Zs
 
 
 def get_fstat_snpwindow_chrom(chrom, callset, path, populations,
@@ -664,7 +924,6 @@ def get_fstat_snpwindow(gen_df, quadruples, populations, controlsamples_h3=1,
                                   [populations[h1], s0, s1, populations[o]])
             denom.name = 'denom_h2c_' + str(i)
             fstat = fstat.join(denom, how='outer')
-        print fstat
         # attention there seems to be a strange bug in pandas
         # so that df.sum()['a'] != df['a'].sum()
         fstats.append(list(fstat.apply(np.nansum, axis=0)))
@@ -685,10 +944,15 @@ def get_numerator(gen_df, quadruple, sample_names_quadruple):
             return 0
     h1, h2, h3, o = quadruple
     g = gen_df.groupby(sample_in_quadruple, axis=1)
-    af = g.mean() / 2.
+    try:
+        af = g.mean() / 2.
+    except Exception, e:
+        print gen_df.shape
+        raise e
     num = ((af[h1] - af[h2]) * (af[h3] - af[o])).dropna()
     num = num[num != 0]
     return num
+
 
 
 def reduce_fstat_snpwindow(result, controlsamples_h3, controlsamples_h2):
@@ -816,3 +1080,93 @@ def get_f_reduced(f_df_pc, etetree, outgroup=''):
                                 f_reduced.loc[(f_df_pc['p'] == p) & (f_df_pc['c'] == c) & (
                                     f_df_pc['h3'] == h3), '|f|'] - control['|f|']
     return f_reduced
+
+def get_rscore_tree(f_reduced, tree, summary=np.nanmean):
+    """
+    """
+    f = f_reduced.copy()
+
+    t = copy.deepcopy(tree)
+
+    i=0
+    for node in  t.traverse():
+        if node.children:
+            l = node.children[0]
+            r = node.children[1]
+            lleaves = l.get_leaf_names()
+            rleaves = r.get_leaf_names()
+            
+            node_fl = f[f['p'].isin(lleaves)&f['c'].isin(rleaves)]
+            node_fr = f[f['p'].isin(rleaves)&f['c'].isin(lleaves)]
+            
+            
+            
+            for side, node_f in [(0,node_fl),(1,node_fr)]:
+                if len(node_f):
+                    node_f.sort_values('|f|',ascending=False)
+                    #only take h3 with maximum mean '|f|' on this branch
+                    h3 = node_f.groupby('h3').mean().sort_values('|f|',ascending=False).iloc[0].name
+                    node_f1 = node_f[node_f['h3']==h3]
+                    child = node.get_children()[side]
+                    
+                    child.add_feature('rscore', summary(node_f1['|f|']))
+                    child.add_feature('h3', h3)
+                    child.add_feature('branch_f', node_f) 
+                    
+                    
+    return t
+
+def get_node_name(node):
+    if node.is_leaf():
+        return node.name
+    else:        
+        return str(",".join(["".join([n[0] for n in c.get_leaf_names()]) for c in node.get_children()]))
+
+def try_get_f(node, taxa, statistic='|f|', cp_summary=np.nanmean):
+    if hasattr(node, 'branch_f'):
+        h3groups = node.branch_f.groupby('h3')
+        h3_summary = h3groups.apply(lambda df: cp_summary(df[statistic].values))
+        return h3_summary.ix[taxa]
+    else:
+        return pd.Series({t:np.nan for t in taxa})
+
+def get_branch_mat(rscore_tree, statistic='|f|',cp_summary=np.nanmean):
+    """
+    Tree without outgroup.
+    """
+    taxa = rscore_tree.get_leaf_names()
+    branch_mat_df = pd.DataFrame()
+    for node in rscore_tree.iter_descendants('preorder'):
+        node_name = get_node_name(node)
+        if node_name in branch_mat_df.columns:
+            node_name = node_name + '0'
+        branch_mat_df.loc[:,node_name] = try_get_f(node, taxa, statistic=statistic, cp_summary=cp_summary)#cp_summary=np.nanmax
+    branch_mat = branch_mat_df.T.loc[:,taxa]
+    branch_mat = branch_mat.iloc[::-1,:]
+    return branch_mat
+
+#####################################################################
+##Plot tree residuals#######################
+####################################################################
+
+def get_tree_residual_mat(tree, pwd):
+    tree_dist = pd.DataFrame(index=pwd.index,columns=pwd.columns)
+
+    for n0 in tree_dist.index:
+        for n1 in tree_dist.columns:
+            if n0!=n1:
+                tree_dist.loc[n0,n1] = tree.distance(n0,n1)
+    tree_dist1 = tree_dist.stack().dropna()
+    tree_dist1.name = 'tree_dist'
+    pw_diff = pwd.stack().dropna()
+    pw_diff.name = 'pw_diff'
+    
+    tree_dist_vs_pwd = pd.DataFrame(tree_dist1).join(pw_diff,how='inner').dropna().astype(float)
+    discrepancy_pct = (tree_dist_vs_pwd['pw_diff']-tree_dist_vs_pwd['tree_dist'])/tree_dist_vs_pwd['pw_diff']*100           
+    discrepancy_mat = discrepancy_pct.unstack()
+    return discrepancy_mat#tree_dist1, pw_diff#discrepancy_mat
+
+
+
+
+

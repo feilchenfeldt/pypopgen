@@ -23,6 +23,9 @@ Directly read the tabix-index and use this information.
 #give tempfiles more meaningful names:
 outiflename+same random id for all + chunk id
 
+#Parallel reduce does not work if intervals contain no VCF entries
+I presume there is a problem with the temporary files created.
+We should just skip these regions for reducing.
 
 
 """
@@ -262,6 +265,10 @@ class SerialWalker(Walker):
                 self._query_tabix(self.intervals[0])
         except tabix.TabixError, e:
             logging.warning("Tabix raised error: {}".format(str(e)))
+            if 'query failed' in str(e):
+                logging.warning("Assuming that this region happens to have no enries in the vcf. "
+                                  "Please verify manually.")
+                return
             if self.auto_tabix:
                 logging.warning("Trying to (re-)index file. This can take a while.")
                 p = subprocess.Popen(['tabix','-p','vcf','-f',self.in_fh.name],
@@ -312,6 +319,7 @@ class SerialWalker(Walker):
                     logging.error("Is the interval {} in the vcf? ".format(self.intervals[0]))
                     raise e
                 logging.info("Auto-tabix successful.")
+
             else:
                 logging.error("Is file compressed with bgzip and does it have tabix index? "
                                 " If not, produce it or run with flag/argument auto_tabix.")
@@ -347,6 +355,12 @@ class SerialWalker(Walker):
             interval = interval[0]
         try:
             return self.tabix_fh.querys(interval)
+        except tabix.TabixError, e:
+            if 'query failed' in str(e):
+                logging.warning("Tabix error for interval {}: {}".format(interval, str(e)))
+                logging.warning("Assuming that this region happens to have no enries in the vcf. "
+                              "Please verify manually.")
+                return []
         except TypeError:
             try:
                 return self.tabix_fh.query(*interval)#this is 1-indexed. the first entry is NOT included!
@@ -356,8 +370,14 @@ class SerialWalker(Walker):
                                 "Alternatively use string 'Chr:1000000-1005000'".format(interval))
                 raise e
             except tabix.TabixError, e:
-                logging.error("Is the interval {} in the vcf? ".format(interval))
-                raise e
+                if 'query failed' in str(e):
+                    logging.warning("Tabix error for interval {}: {}".format(interval, str(e)))
+                    logging.warning("Assuming that this region happens to have no enries in the vcf. "
+                                  "Please verify manually.")
+                    return []
+                else:
+                    logging.error("Is the interval {} in the vcf? Tabix error: {}".format(interval, str(e)))
+                    raise e
 
     def _split_line(self,line):
         """
@@ -374,8 +394,12 @@ class SerialWalker(Walker):
         with the desired interval.
         """
         if self.parser.parse_fun is not None:
+
             logging.info("{}Parsing vcf body of {}.".format(self.id,fh))
-            line_it = self._yield_split_line(fh)
+            if fh:
+                line_it = self._yield_split_line(fh)
+            else:
+                line_it = []
             logging.debug("Chunk:{}".format(self.parser.chunk))
             for d in line_it:
                 #attention: pytabix behaves different from tabix
@@ -539,6 +563,8 @@ class ParallelWalker(SerialWalker):
         if self.parser.reduce_fun is not None:
             logging.info("Starting reduce step.")
             self.parser.reduce_fun([p for p in self.subparsers])
+            for p in self.subparsers:
+                logging.debug(p.out_file)
         else:
             logging.warning("No reduce function given. Won't do anything.")
 
@@ -552,16 +578,18 @@ class ParallelWalker(SerialWalker):
 
 
     def del_temp_files(self):
-        #logging.info("Removing temp files.")
-        #while self.temp_fns:
-        #    os.remove(self.temp_fns.pop())
-        pass
+        logging.info("Removing temp files.")
+        while self.temp_fns:
+            os.remove(self.temp_fns.pop())
 
     def run_parser(self, i):
         s = self.subwalkers[i]
         for a in s.parser.line_write_attrs:
             setattr(s.parser,a,open(getattr(s.parser,a+'_fn'),'w'))
         s.run_no_output()
+        #close files, otherwise not written
+        for a in s.parser.line_write_attrs:
+            getattr(s.parser,a).close()
         return s.parser
 
     def run(self):
@@ -649,6 +677,19 @@ def get_header_line_dic(line):
         #print line.strip().split('=<')[1][:-1].split(',')
         #print  [t.split('=') for t  in line.strip().split('=<')[1][:-1].split(',')]
     return dic
+
+
+def get_012(gt_str):
+    if gt_str[:3] in ["0/0","0|0"]:
+        return "0"
+    elif gt_str[:3] in ["1/1","1|1"]:
+        return "2"
+    elif gt_str[:3] in ["0/1","0|1","1|0"]:
+        return "1"
+    elif gt_str[:3] == "./.":
+        return "N"
+    else:
+        raise ValueError("Unsupported genotype " + gt_str)
 
 
 def get_012(gt_str):
@@ -1696,7 +1737,11 @@ class AddVariantsFromFasta(LineWriteParser):
     """
     Add variants from fasta to vcf.
     This is useful if one wants to annotate
-    a vcf that includes ancestral alleles
+    a vcf that includes ancestral alleles.
+    Attention, this only adds the alternative allele
+    but does NOT add the genotype of the outgroup as a 
+    separate column. It makes only sense to use this
+    on an all sites VCF.
     """
     args = {'fasta':{'required':True,
                      'type':argparse.FileType('r'),
@@ -1726,6 +1771,56 @@ class AddVariantsFromFasta(LineWriteParser):
             logging.debug("Adding macaque variant {} in line {}.".format(aa,
                                                                 ":".join(sline[:2])))
             logging.debug("\t".join(sline[:8]))
+        self.out_file.write("\t".join(sline)+'\n')
+
+
+class AddGenotypeFromFasta(LineWriteParser):
+    """
+    Add genotype of an outgroup from fasta to vcf.
+    Attention, this only adds the genotype for existing 
+    variants, it will not add genotypes for alleles that were 
+    not called previously.
+    """
+    args = {'fasta':{'required':True,
+                     'type':argparse.FileType('r'),
+                     'help':'Filepath of fasta with from which '
+                            'variants will be added.'},
+            'drop_missing':{'type':bool,
+                            'help': 'Drop entries where fasta has N or third variant.'},
+            'sample_name':{'required':True,
+                            'help':"Sample name of sequence to add."},
+              'out_file':{'required':True,
+                                 'type':argparse.FileType('w'),
+                           'help':"Filepath to write output vcf to."}}
+    def __init__(self,**kwa):
+        from pyfasta import Fasta
+        self.fasta = Fasta(self.fasta.name)
+
+    def header_fun(self, line):
+        if line[:len('#CHROM')] == '#CHROM':
+            line = line.strip() + '\t' +  self.sample_name + '\n'
+        self.out_file.write(line)
+
+
+    def parse_fun(self, sline):
+        #print "Hallo"
+        assert sline[8] == 'GT:DS:GP', 'only format GT:DS:GP supported' 
+        ref = sline[3]
+        #for now only first alt allele supported
+        alts  = sline[4].split(',')
+        aa = self.fasta[sline[0]][int(sline[1])-1].upper()
+
+        if aa == ref:
+            gt = '0/0:0:1,0,0'
+        elif aa == alts[0]:
+            gt = '1/1:2:0,0,1'
+        else:
+            if not self.drop_missing:
+                gt = './.:.:.'
+            else:
+                return
+
+        sline.append(gt)
         self.out_file.write("\t".join(sline)+'\n')
 
 
@@ -1836,6 +1931,59 @@ class SNPEFFParser(Parser):
         return 'NA'
 
 
+class MakeTreemixInput(LineWriteParser):
+    args = {'populations':{'type':argparse.FileType('r'),
+                      'help':'Json file with population dictionary '
+                           'or tsv file with population table.'},
+             'out_file':
+                {'required':True,
+                'type':argparse.FileType('w'),
+                'help':"File path to write treemix input to."}}
+    #line write parser uses out_file not out_tsv!!!!!!
+    def __init__(self,**kwa):
+        import json
+        ext = os.path.splitext(self.populations.name)[-1]
+        if ext == '.json':
+            self.popdic = json.load(self.populations)
+            self.name_to_pop = {s:k for k,v in self.popdic.iteritems() for s in v}
+        else:
+            raise NotImplementedError('Populations input is only implemented as .json for now.'
+                                      'But extension is "{}".'.format(ext))       
+        self.nts = ['A','C','T','G']
+        
+
+    def header_fun(self,line):
+            
+        if line[1:6] == "CHROM":
+            self.sample_header = line.strip().split("\t")[9:]
+            g = pd.Series(0, index=self.sample_header).groupby(self.name_to_pop)
+            self.pops = sorted(g.groups.keys())
+            self.out_file.write('\t'.join(self.pops)+'\n')
+
+    def parse_fun(self, sline):
+        ref = sline[3]
+        alt = sline[4].split(',')
+        if sline[6] not in ['.','PASS']: #ignore filterd sites
+            pass
+        elif len(alt)>1: #ignore multiallelic sites
+            pass
+        elif len(ref)>1 or len(alt[0])>1: #ignore indels
+            pass
+        else:
+            gt = map(get_012,sline[9:])
+            s = pd.Series(gt,index=self.sample_header)
+            s = s.replace({'N':np.nan}).astype(float)
+            g = s.groupby(self.name_to_pop, sort=True)
+            ref = g.sum()
+            n = 2*g.apply(len)            
+            try:
+                treemix = ref.astype(int).apply(str) + "," + (n-ref).astype(int).apply(str)
+            except TypeError:
+                logging.info(ref)
+                logging.info(n)
+                raise
+            self.out_file.write('\t'.join(treemix.values)+'\n')
+            #logging.debug('pos: {}'.format(sline[1]))
 
 
 
@@ -1963,6 +2111,7 @@ def parse(args,sub_args):
     end = time.time()
     delta = end - start
     logging.info("This run took {} seconds = {} minutes = {} hours.".format(delta,delta/60.,delta/3600.))
+
 
 
 

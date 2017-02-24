@@ -223,6 +223,18 @@ def get_second_haplotype(s):
         return np.nan
 
 
+def get_depth(s):
+    try:
+        depth_str = s.split(':')[2]
+    except IndexError:
+        return np.nan
+    try:
+        return int(depth_str)
+    except ValueError:
+    #    assert gt_str[2] == '.', 'Unknown allele {}'.format(gt_str[2])
+        return np.nan
+
+
 def get_haplotype(s):
     gt_str = s.split(':', 1)[0]
     try:
@@ -272,6 +284,9 @@ class converters:
     def second_haplotype(samples):
         return {n: get_second_haplotype for n in samples}
 
+    @staticmethod
+    def depth(samples):
+        return {n: get_depth for n in samples}
 
 def get_genotype_df(fn, chrom, start=None, end=None, header=None):
 
