@@ -651,6 +651,111 @@ def phylo_from_str(tree_str):
 #-----------------------------------------------------------------
 
 #------------------------------------------------------------------
+# More general functions to calculate different f-statistics
+# (D-statistics, F4 admixture fraction, etc.) and jackknife
+# Should replace other function in the future
+#------------------------------------------------------------------
+
+def get_stat(fn, populations, quadruples, stat = 'D',
+                              chunksize=50000, chrom=None,
+                              add_ref = False,
+                              apply_fun=None,
+                              get_result_fun=None, use_haplotypes=False, **stat_kwa):
+    
+    samples = [s for vs in populations.values() for s in vs]
+    if add_ref:
+        samples = [s for s in samples if s!= 'ref']
+    if stat == 'D':
+            f = dstat_chunk
+    elif stat == 'f4ratio':
+            f = fstat_chunk
+
+
+    if not use_haplotypes:
+
+        def get_stat_chunk(chunk):
+            if add_ref:
+                chunk.loc[:,'ref'] = 0
+            return f(chunk, quadruples, populations, **stat_kwa)
+     
+        results = vp.map_reduce_geno(fn, get_stat_chunk, chrom=chrom,
+                                     samples=samples,
+                                     chunksize=chunksize, apply_fun=apply_fun,
+                                     get_result_fun=get_result_fun,
+                                     reduce_fun=None)
+    else:
+
+        hap_populations = {k:[s for n in v for s in (n + '_h0',n + '_h1')] for k, v in populations.iteritems()} 
+        def get_stat_chunk(chunk0, chunk1):
+            if add_ref:
+                chunk0.loc[:,'ref'] = 0
+            if add_ref:
+                chunk1.loc[:,'ref'] = 0
+            chunk0.columns = [n+'_h0' for n in chunk0.columns] 
+            chunk1.columns = [n+'_h1' for n in chunk1.columns]
+            return f(pd.concat([chunk0,chunk1], axis=1), quadruples, hap_populations, **stat_kwa)
+
+        results = vp.map_reduce_haplo(fn, get_stat_chunk, chrom=chrom,
+                                     samples_h0=samples,
+                                     samples_h1=samples,
+                                     chunksize=chunksize, apply_fun=apply_fun,
+                                     get_result_fun=get_result_fun,
+                                     reduce_fun=None)
+  
+    return results
+
+
+def dstat_chunk(gen_df, quadruples, populations):
+    """
+    Output:
+    """
+    pop_s = pd.Series(
+        {n: k for k, v in populations.iteritems() for n in v})
+    g = gen_df.groupby(pop_s, axis=1)
+    af = g.mean() / 2.
+
+    dstats = []
+
+    for j, (h1, h2, h3, o) in enumerate(quadruples):
+
+        dstat = pd.DataFrame(columns=['num', 'denom'])
+        dstat['num'] = ((af[h1] - af[h2]) * (af[h3] - af[o])).dropna()
+
+        dstat['denom'] = ((af[h1] + af[h2] - 2 * af[h1] * af[h2])
+                          * (af[h3] + af[o] - 2 * af[h3] * af[o])).dropna()
+        dstat.dropna(inplace=True)
+        # attention there seems to be a strange bug in pandas
+        # so that df.sum()['a'] != df['a'].sum()
+        dstats.append(list(dstat.apply(np.nansum, axis=0)))
+    return dstats
+
+def reduce_chunks(chunk_fstats):
+    """
+    """
+
+    def divide_numdenom(numdenom):
+        return [numdenom[0] * 1. / c for c in numdenom[1:]]
+    def calc_f_jackknife(chunk_fstats,jackknife_index=-np.inf):
+        """
+        leave jackknife_index out
+        """
+        numdenom = chunk_fstats[np.arange(len(chunk_fstats)) != jackknife_index].sum(axis=0)
+        fs = np.apply_along_axis(divide_numdenom,1,numdenom)
+        return fs
+
+    chunk_fstats = np.array(chunk_fstats)
+
+    fs = calc_f_jackknife(chunk_fstats)
+
+    jackknife_estimates = [calc_f_jackknife(chunk_fstats,i) for i in range(len(chunk_fstats))]
+
+    zscores = fs / \
+            (np.std(jackknife_estimates, axis=0, ddof=1)
+             * np.sqrt(len(jackknife_estimates)))
+
+    return fs, zscores
+
+#------------------------------------------------------------------
 # Functions to calculate f-statistics (admixture fraction) and jackknife
 #------------------------------------------------------------------
 
@@ -831,46 +936,49 @@ def get_fstat_df_chunk(fs, Zs, quadruples, controlsamples_h3, controlsamples_h2)
     return fstat_df
 
 
-def reduce_fstat_snpwindow(result, controlsamples_h3, controlsamples_h2):
-
-    def fs_from_array(jackknife_arr):
-        numdenom_from_jackknife = np.sum(jackknife_arr, axis=0)
-        fs_from_jackknife = [numdenom_from_jackknife[0]
-                             * 1. / c for c in numdenom_from_jackknife[1:]]
-        return fs_from_jackknife
-
-    fs = []
-    Zs = []
-    # iterate over index of h1,h2,h3,o tuples
-    for tpl_ix in range(len(result[0][0])):
-
-        numdenom = np.sum(np.array([result[i][0][tpl_ix]
-                                    for i in range(len(result))]), axis=0)
-        fs0 = [numdenom[0] * 1. / c for c in numdenom[1:]]
-        assert len(fs0) == (controlsamples_h3 + controlsamples_h2)
-        fs_h3c = fs0[:controlsamples_h3]
-        fs_h2c = fs0[controlsamples_h3:]
-
-        fs.append([fs_h3c, fs_h2c])
-
-        jackknife_arr = np.concatenate([result[i][1][tpl_ix] for i in range(
-            len(result)) if result[i][1][tpl_ix]])[:, 1:]
-
-        fs_from_jackknife = fs_from_array(jackknife_arr)
-
-        jackknife_estimates = [fs_from_array(jackknife_arr[np.arange(jackknife_arr.shape[0]) != i])
-                               for i in range(jackknife_arr.shape[0])]
-
-        # return fs_from_jackknife, jackknife_estimates
-        print "Number of jackknife estimates for quadruple {}:".format(tpl_ix), len(jackknife_estimates)
-
-        zscores = fs_from_jackknife / \
-            (np.std(jackknife_estimates, axis=0, ddof=1)
-             * np.sqrt(len(jackknife_estimates)))
-        Zs.append([list(zscores[:controlsamples_h3]),
-                   list(zscores[controlsamples_h3:])])
-
-    return fs, Zs
+#def reduce_fstat_snpwindow(result, controlsamples_h3, controlsamples_h2):
+#
+#    def fs_from_array(jackknife_arr):
+#        numdenom_from_jackknife = np.sum(jackknife_arr, axis=0)
+#        fs_from_jackknife = [numdenom_from_jackknife[0]
+#                             * 1. / c for c in numdenom_from_jackknife[1:]]
+#        return fs_from_jackknife
+#
+#    fs = []
+#    Zs = []
+#    # iterate over index of h1,h2,h3,o tuples
+#    for tpl_ix in range(len(result[0][0])):
+#
+#        numdenom = np.sum(np.array([result[i][0][tpl_ix]
+#                                    for i in range(len(result))]), axis=0)
+#        try:
+#            fs0 = [numdenom[0] * 1. / c for c in numdenom[1:]]
+#        except:
+#            print numdenom
+#        assert len(fs0) == (controlsamples_h3 + controlsamples_h2)
+#        fs_h3c = fs0[:controlsamples_h3]
+#        fs_h2c = fs0[controlsamples_h3:]
+#
+#        fs.append([fs_h3c, fs_h2c])
+#
+#        jackknife_arr = np.concatenate([result[i][1][tpl_ix] for i in range(
+#            len(result)) if result[i][1][tpl_ix]])[:, 1:]
+#
+#        fs_from_jackknife = fs_from_array(jackknife_arr)
+#
+#        jackknife_estimates = [fs_from_array(jackknife_arr[np.arange(jackknife_arr.shape[0]) != i])
+#                               for i in range(jackknife_arr.shape[0])]
+#
+#        # return fs_from_jackknife, jackknife_estimates
+#        print "Number of jackknife estimates for quadruple {}:".format(tpl_ix), len(jackknife_estimates)
+#
+#        zscores = fs_from_jackknife / \
+#            (np.std(jackknife_estimates, axis=0, ddof=1)
+#             * np.sqrt(len(jackknife_estimates)))
+#        Zs.append([list(zscores[:controlsamples_h3]),
+#                   list(zscores[controlsamples_h3:])])
+#
+#    return fs, Zs
 
 
 def get_fstat_snpwindow_chrom(chrom, callset, path, populations,
@@ -970,7 +1078,10 @@ def reduce_fstat_snpwindow(result, controlsamples_h3, controlsamples_h2):
 
         numdenom = np.sum(np.array([result[i][0][tpl_ix]
                                     for i in range(len(result))]), axis=0)
-        fs0 = [numdenom[0] * 1. / c for c in numdenom[1:]]
+        try:
+            fs0 = [numdenom[0] * 1. / c for c in numdenom[1:]]
+        except: 
+            print numdenom
         assert len(fs0) == (controlsamples_h3 + controlsamples_h2)
         fs_h3c = fs0[:controlsamples_h3]
         fs_h2c = fs0[controlsamples_h3:]
