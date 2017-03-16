@@ -1,6 +1,7 @@
 #fix svg inkscape bug
 import io, re
-
+import matplotlib as mpl
+from matplotlib import pyplot as plt
 
 def fixmiterlimit(svgdata, miterlimit = 10):
     # miterlimit variable sets the desired miterlimit
