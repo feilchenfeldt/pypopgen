@@ -1214,9 +1214,9 @@ def get_rscore_tree(f_reduced, tree, summary=np.nanmean):
             
             for side, node_f in [(0,node_fl),(1,node_fr)]:
                 if len(node_f):
-                    node_f.sort_values('|f|',ascending=False)
+                    node_f.sort_values('|f|', ascending=False)
                     #only take h3 with maximum mean '|f|' on this branch
-                    h3 = node_f.groupby('h3').mean().sort_values('|f|',ascending=False).iloc[0].name
+                    h3 = node_f.groupby('h3').mean().sort_values('|f|', ascending=False).iloc[0].name
                     node_f1 = node_f[node_f['h3']==h3]
                     child = node.get_children()[side]
                     

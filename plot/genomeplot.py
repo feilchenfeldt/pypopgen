@@ -149,7 +149,7 @@ def plot_chrom_series(series,chrom_len,plotfun=None,grid=None,parent_gridelement
        # if chrom == 'CAE3':
             #print series.ix[chrom].index.values[~np.isnan(series.ix[chrom].values)]
         try:
-            chrom_series = series.ix[chrom]
+            chrom_series = series.loc[chrom]
         except KeyError:
             continue
         plotfun(chrom_series.index.values,chrom_series.values,'.',color=color1,rasterized=True,**kwa)
