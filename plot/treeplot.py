@@ -46,7 +46,7 @@ def plot_node_tree(tree, ax=None, x0=0,y0=0, plot_leaf_names=True, em=0.7,fontsi
 
             nletters = len(node.name)
             if plot_leaf_names:
-                ax.annotate(node.name,xy=(depth+em*maxletters,y),fontsize=12, va='center',ha='right')
+                ax.annotate(node.name,xy=(depth+em*maxletters,y), va='center',ha='right')
             hline2, = ax.plot([x+1,depth+em*(maxletters-nletters)], [y,y], '-',color='k')
         else:
             #print rows_below
@@ -247,7 +247,7 @@ def plot_tree(tree0, x0=0, y0=0, plot_labels=True, ax=None, labeldist_correct_fa
     ax.set_ylim([ylim_min,ylim_max])
     ax.set_xlim([x0-0.5, x0+len(terminals)*xstep+0.5])
     
-    plt.axis('off')
+    #plt.axis('off')
     #fig.axes.get_xaxis().set_visible(False)
     #fig.axes.get_yaxis().set_visible(False)
     

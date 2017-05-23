@@ -176,8 +176,8 @@ def reduce_dstat_snpwindow(result, chromosomes=None):
                                for i in range(jackknife_arr.shape[0])]
         print "Number of jackknife estimates for quadruple {}:".format(tpl_ix), len(jackknife_estimates)
 
-        Z.append(dstat_from_jackknifes / (np.std(jackknife_estimates,
-                                                 ddof=1) * np.sqrt(len(jackknife_estimates))))
+        Z.append(dstat_from_jackknifes / (np.std(jackknife_estimates
+                                                 ) * np.sqrt(len(jackknife_estimates)-1)))
 
         if result[0][2]:
             window_arr = np.concatenate(
@@ -750,8 +750,8 @@ def reduce_chunks(chunk_fstats):
     jackknife_estimates = [calc_f_jackknife(chunk_fstats,i) for i in range(len(chunk_fstats))]
 
     zscores = fs / \
-            (np.std(jackknife_estimates, axis=0, ddof=1)
-             * np.sqrt(len(jackknife_estimates)))
+            (np.std(jackknife_estimates, axis=0)
+             * np.sqrt(len(jackknife_estimates)-1))
 
     return fs, zscores
 
@@ -823,9 +823,12 @@ def get_fstat_chunkwindow_hap(fn, populations, quadruples,
                                  reduce_fun=None)
     return results
 
-def fstat_chunk(gen_df, quadruples, populations, controlsamples_h3=1,
+def fstat_chunk(gen_df, quadruples, populations, ftype='fg', controlsamples_h3=1,
                         controlsamples_h2=0):
     """
+    fg ... f stat from Green et al 2010 SOM 18; called f4 admixture ratio in Patterson et al. 2012.
+    fd ... from Martin Davey and Jiggins 2014
+
     Output:
     fstats ... List of lists of shape:
     (n_chunks, len(quadruples), 1 + controlsamples_h3 + controlsamples_h2)
@@ -876,6 +879,156 @@ def fstat_chunk(gen_df, quadruples, populations, controlsamples_h3=1,
 
 
 
+def get_fstat(gen_df, quadruples, populations, ftype='fg'):
+    """
+    fg ... f stat from Green et al 2010 SOM 18; called f4 admixture ratio in Patterson et al. 2012.
+    fcompare ... compare patterson 2012 estimator of f4 (x1-x2)*(x3-x4)
+                    to the one in Green et al 2010, Durand 2011, etc. (1-x1)x2x3(1-x4)-x2(1-x2)x3(1-x4)
+    fhom ... instead of a random subsample from H3, this uses the freq in H3 twice in the denominator 
+             (See ref below.)
+    fd ... from Martin Davey and Jiggins 2014
+
+    Output:
+    fstats ... List of lists of shape:
+    (n_chunks, len(quadruples), 1 + controlsamples_h3 + controlsamples_h2)
+    
+    1st level: quadruples
+    2nd lebel:  List of [numerator, denominator]
+    """   
+    def sample_in_quadruple(sample_name):
+        for h in (h1, h2, h3, o):
+            if sample_name in populations[h]:
+                return h
+        else:
+            return 0
+
+
+    fstats = []
+
+    for j, (h1, h2, h3, o) in enumerate(quadruples):
+        if ftype == 'dcompare':
+            g = gen_df.groupby(sample_in_quadruple, axis=1)
+            af = g.mean() / 2.
+            #ascertain on o being ancestral
+            af1 = af.mul((1-af[o]), axis='index')+(1-af).mul(af[o], axis='index')
+            num1 = ((af[h1] - af[h2]) * (af[h3] - af[o]))
+            num2 = (1-af1[h1])*af1[h2]*af1[h3]*(1-af1[o]) - af1[h1]*(1-af1[h2])*af1[h3]*(1-af1[o])
+            num1.name = 'num1'
+            num2.name = 'num2'
+            #denom calculated like hom:
+            denom1 = (af[h1] + af[h2] - 2*af[h1]*af[h2]) * (af[h3] + af[o] - 2*af[h3]*af[o])
+            denom2 = (1-af1[h1])*af1[h2]*af1[h3]*(1-af1[o]) + af1[h1]*(1-af1[h2])*af1[h3]*(1-af1[o])
+            denom1.name = 'denom1'
+            denom2.name = 'denom2'
+            numdenom1 = pd.DataFrame(num1).join(denom1, how='outer')
+            numdenom1sum = list(numdenom1.apply(np.nansum, axis=0))
+            print numdenom1sum
+            
+            numdenom2 = pd.DataFrame(num2).join(denom2, how='outer')
+            numdenom2sum = list(numdenom2.apply(np.nansum, axis=0))
+            print numdenom2sum
+            
+                # attention there seems to be a strange bug in pandas
+                        # so that df.sum()['a'] != df['a'].sum()
+            fstats.append([numdenom1sum[0]*1./numdenom1sum[1], numdenom2sum[0]*1./numdenom2sum[1]])
+            continue
+        if ftype == 'fcompare':
+            g = gen_df.groupby(sample_in_quadruple, axis=1)
+            af = g.mean() / 2.
+            af1 = af.mul((1-af[o]), axis='index')+(1-af).mul(af[o], axis='index')
+            num1 = ((af[h1] - af[h2]) * (af[h3] - af[o]))
+            num2 = (1-af1[h1])*af1[h2]*af1[h3]*(1-af1[o]) - af1[h1]*(1-af1[h2])*af1[h3]*(1-af1[o])
+            num1.name = 'num1'
+            num2.name = 'num2'
+            #denom calculated like hom:
+            denom1 = ((af[h1] - af[h3]) * (af[h3] - af[o]))
+            denom2 = (1-af1[h1])*af1[h3]*af1[h3]*(1-af1[o]) - af1[h1]*(1-af1[h3])*af1[h3]*(1-af1[o])
+            denom1.name = 'denom1'
+            denom2.name = 'denom2'
+            numdenom1 = pd.DataFrame(num1).join(denom1, how='outer')
+            numdenom1sum = list(numdenom1.apply(np.nansum, axis=0))
+            
+            numdenom2 = pd.DataFrame(num2).join(denom2, how='outer')
+            numdenom2sum = list(numdenom2.apply(np.nansum, axis=0))
+
+            
+                # attention there seems to be a strange bug in pandas
+                        # so that df.sum()['a'] != df['a'].sum()
+            fstats.append([numdenom1sum[0]*1./numdenom1sum[1], numdenom2sum[0]*1./numdenom2sum[1]])
+            continue
+            
+        fstat = get_numerator(gen_df, (h1, h2, h3, o),
+                              [populations[p] for p in (h1, h2, h3, o)])
+        fstat.name = 'num'
+        fstat = pd.DataFrame(fstat)
+        if ftype == 'fg':
+            n_samples = len(populations[h3])
+            assert n_samples > 1, "cannot split p3 {}:{}. Consider use_haplotypes=True.".format(
+                h3, populations[h3])
+            s0 = list(np.random.choice(
+                populations[h3], n_samples / 2, replace=False))
+            s1 = [s for s in populations[h3] if s not in s0]
+            denom = get_numerator(gen_df, (h1, h2, h3, o),
+                                  [populations[h1], s0, s1, populations[o]])
+        elif ftype == 'hom':
+            denom = get_numerator(gen_df, (h1, h3, h3, o),
+                                  [populations[h1], populations[h3], populations[h3], populations[o]])
+        elif ftype == 'fdabs':
+            g = gen_df.groupby(sample_in_quadruple, axis=1)
+            af = g.mean() / 2.
+            #af = af.mul((1-af[o]), axis='index')+(1-af).mul(af[o], axis='index')
+            #afd = af[h3] * ((af[o]>af[h3]) * (af[h3]>af[h2]) + (af[o]<0.5) * (af[h3]<af[h2])) + \
+            #        af[h2] * ((af[o]>0.5) * (af[h3]<af[h2]) + (af[o]<0.5) * (af[h3]>af[h2]))
+            #afd = af[[h2,h3]].max(axis=1)
+            #denom = ((af[h1] - afd) * (afd - af[o]))
+            
+            denom1 =  ((af[h1] - af[h3]) * (af[h3] - af[o]))
+            denom2 =  ((af[h1] - af[h2]) * (af[h2] - af[o]))
+            denom1.name = 'd1'
+            denom2.name = 'd2'
+            #print denom - a
+            #denom = denom[denom != 0].dropna()
+            denom = - pd.DataFrame(denom1).join(denom2,how='outer').abs().max(axis=1)
+        elif ftype == 'fdm':
+            # generalisation from Malinsky et al. 2015, which always falls between 0 and 1 
+            # as long as af[o] = 0
+            g = gen_df.groupby(sample_in_quadruple, axis=1)
+            af = g.mean() / 2.
+
+            af = af.mul((1-af[o]), axis='index')+(1-af).mul(af[o], axis='index')
+
+
+
+            p1 = af[h1]
+            p2 = af[h2]
+            p3 = af[h3]
+
+            fstat = (p1-p2) * (p3-af[o])
+            fstat.name = 'num'
+            fstat = pd.DataFrame(fstat)
+
+
+            a = (p3 > p1)
+            b = (p3 > p2)
+            x = (p1 > p2)
+            y = ~x
+            pdm1 = p3*(x&a) + p1*(~(x&a))
+            pdm2 = p3*(y&b) + p2*(~(y&b))
+            pdm3 = -p3*(x&a) + p3*(y&b) - p1*(x&~a) + p2*(y&~b)
+            denom = ((pdm1 - pdm2) * (pdm3 - af[o]))
+        else:
+            raise ValueError("Unknown ftype '{}'".format(ftype))
+        denom.name = 'denom'
+        fstat = fstat.join(denom, how='outer')
+
+            
+        # attention there seems to be a strange bug in pandas
+        # so that df.sum()['a'] != df['a'].sum()
+        fstats.append(list(fstat.apply(np.nansum, axis=0)))
+
+
+    return fstats
+
 
 def reduce_fstat_chunks(chunk_fstats):
     """
@@ -899,8 +1052,8 @@ def reduce_fstat_chunks(chunk_fstats):
     jackknife_estimates = [calc_f_jackknife(chunk_fstats,i) for i in range(len(chunk_fstats))]
 
     zscores = fs / \
-            (np.std(jackknife_estimates, axis=0, ddof=1)
-             * np.sqrt(len(jackknife_estimates)))
+            (np.std(jackknife_estimates, axis=0)
+             * np.sqrt(len(jackknife_estimates)-1))
 
     return fs, zscores
 
@@ -1055,7 +1208,6 @@ def get_numerator(gen_df, quadruple, sample_names_quadruple):
     try:
         af = g.mean() / 2.
     except Exception, e:
-        print gen_df.shape
         raise e
     num = ((af[h1] - af[h2]) * (af[h3] - af[o])).dropna()
     num = num[num != 0]
@@ -1100,8 +1252,8 @@ def reduce_fstat_snpwindow(result, controlsamples_h3, controlsamples_h2):
         print "Number of jackknife estimates for quadruple {}:".format(tpl_ix), len(jackknife_estimates)
 
         zscores = fs_from_jackknife / \
-            (np.std(jackknife_estimates, axis=0, ddof=1)
-             * np.sqrt(len(jackknife_estimates)))
+            (np.std(jackknife_estimates, axis=0)
+             * np.sqrt(len(jackknife_estimates)-1))
         Zs.append([list(zscores[:controlsamples_h3]),
                    list(zscores[controlsamples_h3:])])
 
@@ -1190,11 +1342,51 @@ def get_f_reduced(f_df_pc, etetree, outgroup=''):
                             f_reduced.loc[(f_df_pc['p'] == p) & (f_df_pc['c'] == c) & (f_df_pc['h3'] == h3), '|f|'] = \
                                 f_reduced.loc[(f_df_pc['p'] == p) & (f_df_pc['c'] == c) & (
                                     f_df_pc['h3'] == h3), '|f|'] - control['|f|']
+    f_reduced.loc[:,'|f|'] = f_reduced.loc[:,'|f|'].apply(lambda f: max(0, f))
     return f_reduced
 
-def get_rscore_tree(f_reduced, tree, summary=np.nanmean):
+
+def get_f_reduced2(f_df_pc, etetree, outgroup=''):
+    t = etetree
+    f_reduced = f_df_pc.copy()
+    for node in t.iter_descendants():
+        if node.children:
+            l = node.children[0]
+            r = node.children[1]
+            lleaves = l.get_leaf_names()
+            rleaves = r.get_leaf_names()
+            for h3 in [p for p in t.get_leaf_names() if p not in lleaves + rleaves and p != outgroup]:
+                for p in lleaves:
+                    for c in rleaves:
+                        control_df = f_df_pc[(f_df_pc['p'] == p) & (
+                            f_df_pc['c'].isin(lleaves)) & (f_df_pc['h3'] == h3)]
+                        if len(control_df):
+                            control = control_df.sort_values(
+                                '|f|', ascending=False).iloc[0]
+                            f_reduced.loc[(f_df_pc['p'] == p) & (f_df_pc['c'] == c) & (f_df_pc['h3'] == h3), '|f|'] = \
+                                f_reduced.loc[(f_df_pc['p'] == p) & (f_df_pc['c'] == c) & (
+                                    f_df_pc['h3'] == h3), '|f|'] - control['|f|']
+                for p in rleaves:
+                    for c in lleaves:
+                        control_df = f_df_pc[(f_df_pc['p'] == p) & (
+                            f_df_pc['c'].isin(rleaves)) & (f_df_pc['h3'] == h3)]
+                        if len(control_df):
+                            control = control_df.sort_values(
+                                '|f|', ascending=False).iloc[0]
+                            f_reduced.loc[(f_df_pc['p'] == p) & (f_df_pc['c'] == c) & (f_df_pc['h3'] == h3), '|f|'] = \
+                                f_reduced.loc[(f_df_pc['p'] == p) & (f_df_pc['c'] == c) & (
+                                    f_df_pc['h3'] == h3), '|f|'] - control['|f|']
+    f_reduced.loc[:,'|f|'] = f_reduced.loc[:,'|f|'].apply(lambda f: max(0, f))
+    return f_reduced
+
+
+def get_rscore_tree(f_reduced, tree, summary=None, add_inverse_as_zero=False):
+
     """
     """
+    if summary is not None:
+        print "Warning, summary is depriciated. Not used. nodes feature full branch_f."
+
     f = f_reduced.copy()
 
     t = copy.deepcopy(tree)
@@ -1216,16 +1408,60 @@ def get_rscore_tree(f_reduced, tree, summary=np.nanmean):
                 if len(node_f):
                     node_f.sort_values('|f|', ascending=False)
                     #only take h3 with maximum mean '|f|' on this branch
-                    h3 = node_f.groupby('h3').mean().sort_values('|f|', ascending=False).iloc[0].name
-                    node_f1 = node_f[node_f['h3']==h3]
+                    #h3 = node_f.groupby('h3').mean().sort_values('|f|', ascending=False).iloc[0].name
+                    #node_f1 = node_f[node_f['h3']==h3]
                     child = node.get_children()[side]
                     
-                    child.add_feature('rscore', summary(node_f1['|f|']))
-                    child.add_feature('h3', h3)
+                    #child.add_feature('rscore', summary(node_f1['|f|']))
+                    #child.add_feature('h3', h3)
                     child.add_feature('branch_f', node_f) 
                     
                     
     return t
+
+
+def get_fmin_tree(f_df, tree):
+
+    """
+    """
+
+    f = f_df.copy()
+
+    t = copy.deepcopy(tree)
+
+    i=0
+    for node in  t.traverse():
+        if node.children:
+            l = node.children[0]
+            r = node.children[1]
+            lleaves = l.get_leaf_names()
+            rleaves = r.get_leaf_names()
+            
+            node_fl = f[f['p'].isin(lleaves)&f['c'].isin(rleaves)]
+            node_fr = f[f['p'].isin(rleaves)&f['c'].isin(lleaves)]
+            
+            
+            
+            for side, node_f, sister_f in [(0,node_fl, node_fr),(1,node_fr, node_fl)]:
+                if len(node_f) or len(sister_f):
+        
+                    sister_f0 = sister_f.rename(columns={'c':'p','p':'c'})
+                    sister_f0['|f|'] = 0
+                    sister_f0['|Z|'] = 0
+                    nf = pd.concat([node_f, sister_f0])
+
+                    #node_f.sort_values('|f|', ascending=False)
+                    #only take h3 with maximum mean '|f|' on this branch
+                    #h3 = node_f.groupby('h3').mean().sort_values('|f|', ascending=False).iloc[0].name
+                    #node_f1 = node_f[node_f['h3']==h3]
+                    child = node.get_children()[side]
+                    
+                    #child.add_feature('rscore', summary(node_f1['|f|']))
+                    #child.add_feature('h3', h3)
+                    child.add_feature('branch_f', nf.groupby(['c','h3']).min().reset_index()) 
+                    
+    return t
+
 
 def get_node_name(node):
     if node.is_leaf():

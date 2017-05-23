@@ -40,3 +40,5 @@ def pairwise_diff_mat(df):
     return pd.DataFrame(diff,index=cols,columns=cols)
 
 
+
+
