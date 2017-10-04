@@ -1,3 +1,17 @@
+"""
+Tensor based implementation of f-statistics to 
+simultaneously calculate many comparisons.
+
+Works on VCF files.
+
+For memory efficiency, weighted block-jackknifing is
+currently done across whole chromosomes.
+
+F-test was compared to previous implementation (which was checked
+against Admixtols). Results were extremely close, e.g.: D +- 0.25%
+
+"""
+
 import logging
 import numpy as np
 import pandas as pd
@@ -91,22 +105,13 @@ class Ftest(object):
                 if each individual is its on population this can also
                 be a list of individuals
     reduce_dim : If true, remove dimensions with length 1 (not implemented).
-    jackknife_levels : 'chrom' ... weighted block-jackknife across whole chromosomes
-                       'chumk' ... block-jackknife across chunks of chunksize snps
-                                   This can be very memory intensive. 
     """
     ftype = None
 
     def __init__(self, vcf_filename,
                 ind_to_pop=None,
-                reduce_dim=False,
-                jackknife_level='chrom'):
+                reduce_dim=False):
         
-        jackknife_levels = ['chunk', 'chrom']
-
-        assert jackknife_level in jackknife_levels, "Unknown jackknife_level {}, allowed are {}".format(jackknife_level, jackknife_levels)
-        assert jackknife_level == 'chrom', "Other jackknife method not yet implemented"
-        self.jackknife_level = jackknife_level
 
         self.vcf_filename = vcf_filename
 
@@ -142,6 +147,29 @@ class Ftest(object):
         else:
             af = pd.DataFrame(columns=set(ind_to_pop.values()))
         return af
+
+    @staticmethod
+    def get_ac(hap_df, ind_to_pop):
+        if len(hap_df):
+            ac = hap_df.groupby(level=0, axis=1).sum()
+            ac = ac.groupby(ind_to_pop, axis=1).sum()
+        else:
+            ac = pd.DataFrame(columns=set(ind_to_pop.values()))
+        return ac
+
+    @staticmethod
+    def get_n(hap_df, ind_to_pop):
+        """
+        Get the number of haplotypes per population.
+        """
+        if len(hap_df):
+            n = hap_df.groupby(level=0, axis=1).apply(lambda df: df.shape[1])
+            
+            n = n.groupby(ind_to_pop).sum()
+            
+        else:
+            n = pd.Series(index=set(ind_to_pop.values()))
+        return n
 
 
     @staticmethod
@@ -195,7 +223,7 @@ class Ftest(object):
                     the block-jackknife block.
         """
         self.get_result_fun = get_result_fun
-        calc_stat = lambda chunk1, chunk2: Dtest.calc_stat_static(chunk1, chunk2, ind_to_pop, h1s, h2s, h3s, h4s)        
+        #calc_stat = lambda chunk1, chunk2: self.calc_stat_static(chunk1, chunk2, ind_to_pop, h1s, h2s, h3s, h4s)        
         #params = {'vcf_filename':self.vcf_filename,
         #         'calc_stat':calc_stat, 'ind_to_pop': self.ind_to_pop, 'h1s':self.h1s,
         #         'h2s':self.h2s, 'h3s': self.h3s, 'h4s': self.h4s,
@@ -211,6 +239,9 @@ class Ftest(object):
         fly_reduce_fun = self.fly_reduce_fun
         #chunksize = self.chunksize
         mr_haplo_fun = vp.map_fly_reduce_haplo
+
+        calc_stat = self.get_calc_stat(ind_to_pop, h1s, h2s, h3s, h4s)
+
         def calc_fstat_fun(chrom):
             return mr_haplo_fun(vcf_filename, calc_stat, 
                                         samples_h0=samples, samples_h1=samples,
@@ -220,7 +251,7 @@ class Ftest(object):
         self.map_result =  map_fun(calc_fstat_fun, chromosomes)
         return self.map_result
 
-    def progress(self)
+    def progress(self):
         return self.map_result.progress
 
     def get_result(self):
@@ -240,6 +271,152 @@ class Ftest(object):
         return stat_df
 
 
+class PairwiseDiff(Ftest):
+    """
+    Parameters:
+    hs1s : list of sample names to use as h1
+    hs2s : list of sample names to use as h2
+    vcf_filename : vcf.gz filename. Should be tabix indexed
+                 for random access.
+    ind_to_pop : dictionary that maps individuals to populations
+                if each individual is its on population this can also
+                be a list of individuals
+    reduce_dim : If true, remove dimensions with length 1 (not implemented).
+    """
+    ftype = 'pwd'
+
+    def __init__(self, vcf_filename, ind_to_pop, h1s, h2s, **kwa):
+        self.h1s = h1s
+        self.h2s = h2s
+        self.h3s = None
+        self.h4s = None
+
+        self.test_fun = calc.pwd
+  
+
+        Ftest.__init__(self, vcf_filename, ind_to_pop, **kwa)
+
+    @staticmethod
+    def fly_reduce_fun(chunk_res, result=None):
+        """
+        Function that reduces on the fly by summing
+        """
+        if result is None:
+            return chunk_res
+        else:
+            return result + chunk_res 
+
+    @staticmethod
+    def calc_stat_static(chunk1, chunk2, ind_to_pop, h1s, h2s, *args):
+        hap_df = Ftest.get_hap_df(chunk1, chunk2)
+        af = Ftest.get_af(hap_df, ind_to_pop)
+        if len(af):
+            return calc.pwd(af[h1s], af[h2s])
+        else:
+            return np.zeros((len(h1s),len(h2s)))
+
+    @staticmethod
+    def get_calc_stat(*args):
+        def calc_stat(chunk1, chunk2):
+            return PairwiseDiff.calc_stat_static(chunk1, chunk2, *args)
+        return calc_stat
+
+    @staticmethod
+    def jackknife(res, i):
+        return np.sum(res[np.arange(len(res))!=i, 0], axis=0)/np.sum(res[np.arange(len(res))!=i, 1], axis=0)
+        
+    @staticmethod
+    def get_stat(res):
+        return np.sum(res, axis=0)
+
+    @staticmethod
+    def get_zscores(res, pwd):
+        return None
+
+    @staticmethod
+    def get_stat_df_static(pwd, h1s, h2s):
+        return pd.DataFrame(pwd, index=h1s, columns=h2s)
+
+    def get_stat_df(self, stat, zscores):
+        return self.get_stat_df_static(stat, self.h1s, self.h2s)
+
+
+
+class F3test(Ftest):
+    """
+    Parameters:
+    hs3s : list of sample names to use as h3
+          This is the branch called 'C' in
+            Patterson et al. 2012 Genetics
+    hs1s : list of sample names to use as h1
+    hs2s : list of sample names to use as h2
+    vcf_filename : vcf.gz filename. Should be tabix indexed
+                 for random access.
+    ind_to_pop : dictionary that maps individuals to populations
+                if each individual is its on population this can also
+                be a list of individuals
+    reduce_dim : If true, remove dimensions with length 1 (not implemented).
+    """
+    ftype = 'f3'
+
+    def __init__(self, vcf_filename, ind_to_pop, h3s, h1s, h2s, **kwa):
+        self.h1s = h1s
+        self.h2s = h2s
+        self.h3s = h3s
+        self.h4s = None
+
+  
+
+        Ftest.__init__(self, vcf_filename, ind_to_pop, **kwa)
+
+    @staticmethod
+    def fly_reduce_fun(chunk_res, result=None):
+        """
+        Function that reduces on the fly by summing
+        """
+        if result is None:
+            return chunk_res
+        else:
+            return result + chunk_res 
+
+    @staticmethod
+    def calc_stat_static(chunk1, chunk2, ind_to_pop, h1s, h2s, h3s, *args):
+        hap_df = Ftest.get_hap_df(chunk1, chunk2)
+        af = Ftest.get_af(hap_df, ind_to_pop)
+        ac = Ftest.get_ac(hap_df, ind_to_pop)
+        n = Ftest.get_n(hap_df, ind_to_pop)
+        if len(af):
+            return calc.f3(ac[h3s], n[h3s], af[h1s], af[h2s])
+        else:
+            return np.zeros((len(h3s),len(h1s), len(h2s)))
+
+    @staticmethod
+    def get_calc_stat(*args):
+        def calc_stat(chunk1, chunk2):
+            return F3test.calc_stat_static(chunk1, chunk2, *args)
+        return calc_stat
+
+    @staticmethod
+    def jackknife(res, i):
+        return np.sum(res[np.arange(len(res))!=i, 0], axis=0)/np.sum(res[np.arange(len(res))!=i, 1], axis=0)
+        
+    @staticmethod
+    def get_stat(res):
+        return np.sum(res, axis=0)
+
+    @staticmethod
+    def get_zscores(res, pwd):
+        return None
+
+    @staticmethod
+    def get_stat_df_static(f3s, h1s, h2s, h3s):
+        return pd.Series(f3s.flatten(), index=pd.MultiIndex.from_tuples([(h3,h1,h2) for h3 in h3s for h1 in h1s for h2 in h2s]))
+
+    def get_stat_df(self, stat, zscores):
+        return self.get_stat_df_static(stat, self.h1s, self.h2s, self.h3s)
+
+
+
 class Dtest(Ftest):
     """
     Parameters:
@@ -247,6 +424,12 @@ class Dtest(Ftest):
     hs2s : list of sample names to use as h2
     hs3s : list of sample names to use as h3
     hs4s : list of sample names to use as h4
+    vcf_filename : vcf.gz filename. Should be tabix indexed
+                 for random access.
+    ind_to_pop : dictionary that maps individuals to populations
+                if each individual is its on population this can also
+                be a list of individuals
+    reduce_dim : If true, remove dimensions with length 1 (not implemented).
 
 
      
@@ -257,7 +440,7 @@ class Dtest(Ftest):
     """
     ftype = 'D'
 
-    def __init__(self, h1s, h2s, h3s, h4s, **kwa):
+    def __init__(self, vcf_filename, ind_to_pop, h1s, h2s, h3s, h4s, **kwa):
         self.h1s = h1s
         self.h2s = h2s
         self.h3s = h3s
@@ -266,7 +449,7 @@ class Dtest(Ftest):
         self.test_fun = calc.d 
   
 
-        Ftest.__init__(self, **kwa)
+        Ftest.__init__(self, vcf_filename, ind_to_pop, **kwa)
 
     @staticmethod
     def fly_reduce_fun(chunk_res, result=None):
@@ -308,6 +491,12 @@ class Dtest(Ftest):
             return calc.d(af[h1s], af[h2s], af[h3s], af[h4s])
         else:
             return np.zeros((len(h1s),len(h2s),len(h3s),len(h4s)))
+
+    @staticmethod
+    def get_calc_stat(*args):
+        def calc_stat(chunk1, chunk2):
+            return Dtest.calc_stat_static(chunk1, chunk2, *args)
+        return calc_stat
 
     @staticmethod
     def jackknife(res, i):
@@ -371,7 +560,27 @@ class calc:
     """
 
     @staticmethod
-    def pwd(af_df):
+    def pwd(af1, af2):
+        """
+        Calculate pairwise differences (pi and dxy).
+        
+        Input can be np.ndarray or pd.DataFrame.
+        Rows are allele frequencies or haplotypes for variants.
+        Columns are individuals or populations.
+
+        Rows containing np.nan should be removed beforehand.
+
+        Result:
+        Diagonal entries are pi = 2p(1-p).
+        Off-diagonal entries are dxy = pq
+
+
+        """
+
+        return np.einsum('ij,ik->jk',af1, 1-af2) + np.einsum('ij,ik->jk',1-af1, af2)
+
+    @staticmethod
+    def pwd0(af_df):
         """
         Calculate pairwise differences (pi and dxy).
         
@@ -396,6 +605,48 @@ class calc:
 
         return pw_af + pw_af.T
  
+    @staticmethod
+    def f3(ac3, n3, af1, af2):
+        """
+        Calculate the f3 statistic as defined in
+        Patterson et al. Genetics 2012. This is 
+        the numerator in Patterson's D statistic.
+
+        This corresponds to the unbiased estimator
+        in Patterson et al. 2012 Appendix A.
+
+        af3 corresponds to population 'C' in 
+        Patterson et al.
+
+        Input is 3 np.ndarrays or pd.DataFrames
+        for each of which rows = SNPs,
+        columns = allele frequencies,
+        with data for all individuals/populations
+        which should
+        be tested for h1, h2, h3, respectively.
+
+        Genotypes or haplotypes can be converted
+        to allele frequencies as 0, 0.5, 1 and 0, 1,
+        respectively.
+
+        Output is a three dimensional np.ndarray,
+        j x k x l, where the length of the 3 
+        axis is the number of individuals in af2,
+        af1, af2, respectively. 
+        """
+        af3 = ac3*1./n3
+        dummy3 = np.ones(af3.shape[1])
+        dummy1 = np.ones(af1.shape[1])
+        dummy2 = np.ones(af2.shape[1])
+
+        return np.einsum('ij,ij,k,l->jkl',af3, (ac3-1)/(n3-1), dummy1, dummy2)  \
+                - np.einsum('ij,ik,l->jkl',af3, af1, dummy2) \
+                - np.einsum('ij,k,il->jkl',af3, dummy1, af2) \
+                + np.einsum('j,ik,il->jkl',dummy3, af1, af2)
+        
+
+
+
     @staticmethod
     def f4(af1, af2, af3, af4):
         """
