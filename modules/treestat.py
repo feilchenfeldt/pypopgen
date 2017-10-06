@@ -33,6 +33,7 @@ from matplotlib import pyplot as plt
 
 # local imports
 import haplotools as hap
+import treetools
 
 logger = logging.getLogger()
 logging.basicConfig(format='%(levelname)-8s %(asctime)s %(filename) '
@@ -90,7 +91,7 @@ def plot_residuals(residuals, tree, pwd):
     cb_ax_width = 0.05
     cb_width = 0.03
 
-    fig = plt.figure(figsize=(12*(1+tree_ax_width)+2,12+1))
+    fig = plt.figure(figsize=(11*(1+tree_ax_width)+2,11+1))
 
 
 
@@ -197,47 +198,20 @@ def plot_residuals(residuals, tree, pwd):
                      #    yls[i].set_color(group_colors[group])
                          
                              
-                             #tree_ax = fig.add_axes([0., 0, tree_ax_width, 1-cb_ax_width])
+    tree_ax = fig.add_axes([0., 0, tree_ax_width*0.65, 1-cb_ax_width])
 
 
 
 
-                             #dstat.draw_tree(tree_no, axes=tree_ax, do_show=False,
-                             #               label_func=lambda c:'')#get_short_scientific(c.name)
+    treetools.draw_tree(tree, axes=tree_ax, do_show=False,
+                                           label_func=lambda c:'')#get_short_scientific(c.name)
 
-    #tree_ax.set_ylim((ax.get_ylim()[0]-0.5,ax.get_ylim()[1]-0.5))
-    #tree_ax.axis('off')
+    tree_ax.set_ylim((ax.get_ylim()[0]-0.5, ax.get_ylim()[1]-0.5))
+    tree_ax.axis('off')
     return fig
 
-def get_pairwise_differences(fn, samples=None, ncpus='auto', chunksize=10000):
-    """
-    Get matrix of pairwise genetic differences.
-
-    fn ... input filename (.vcf or .vcf.gz)
-    samples ... Sample ids to use as given in the
-                vcf header. If 'None', all samples are used
-    ncpus ... Number of processes to spawn. If
-              'auto', number of available cpus is used.
-    """
-    hap.get_pairwise_diff(fn, samples=samples, chunksize=chunksize,
-                          map_fun=pool.map_async, get_result_fun=lambda r: r.get())
+#-------------------------------------------
+###TREE PLOTTING AND VISUALISATION#########
+#-------------------------------------------
 
 
-def get_fstat_snpwindow_chrom(chrom, callset, path, populations,
-                              quadruples, controlsamples_h3=1,
-                              controlsamples_h2=0, jackknife_window=2000):
-    """
-    Jackknife window is in number of informative SNPs.
-    """
-    gen_df = get_gen_df(callset, chrom, path)
-
-    # fstats, jackknife_window_fstats = get_fstat_snpwindow(gen_df, quadruples,
-    #                                                       populations,
-    #                                                       controlsamples_h3=\
-    #                                                       controlsamples_h3,
-    #                                                       controlsamples_h2=\
-    #                                                       controlsamples_h2,
-    #                                                       jackknife_window=\
-    #                                                       jackknife_window)
-    # return fstats, jackknife_window_fstats
-    return gen_df

@@ -359,12 +359,12 @@ class F3test(Ftest):
     """
     ftype = 'f3'
 
-    def __init__(self, vcf_filename, ind_to_pop, h3s, h1s, h2s, **kwa):
+    def __init__(self, vcf_filename, ind_to_pop, h3s, h1s, h2s, do_drop_self_comparisons=False, **kwa):
         self.h1s = h1s
         self.h2s = h2s
         self.h3s = h3s
         self.h4s = None
-
+        self.do_drop_self_comparisons = do_drop_self_comparisons
   
 
         Ftest.__init__(self, vcf_filename, ind_to_pop, **kwa)
@@ -409,11 +409,29 @@ class F3test(Ftest):
         return None
 
     @staticmethod
-    def get_stat_df_static(f3s, h1s, h2s, h3s):
-        return pd.Series(f3s.flatten(), index=pd.MultiIndex.from_tuples([(h3,h1,h2) for h3 in h3s for h1 in h1s for h2 in h2s]))
+    def drop_self_comparisons_static(stat_df, h1s, h2s, h3s):
+        dup_sample_indices = [(h3, h1, h2) for h3 in h3s for h1 in h1s for h2 in h2s if h3==h1 or h3==h2 or h1==h2]
+        df = stat_df.drop(dup_sample_indices)
+        return df
+
+    def drop_self_comparisons(self):
+        df = self.drop_self_comparisons_static(self.stat_df, self.h1s, self.h2s, self.h3s)
+        self.stat_df_drop = df
+        return self.stat_df_drop
+
+    @staticmethod
+    def get_stat_df_static(f3s, stat_name, do_drop_self_comparisons, h1s, h2s, h3s):
+        df = pd.DataFrame(f3s.flatten(), 
+                index=pd.MultiIndex.from_tuples([(h3,h1,h2) for h3 in h3s for h1 in h1s for h2 in h2s]),
+                columns=[stat_name])
+        df.index.names = ['h3','h1','h2']
+        if do_drop_self_comparisons:
+            df = F3test.drop_self_comarisons_static(df, h1s, h2s, h3s)
+        return df
+    
 
     def get_stat_df(self, stat, zscores):
-        return self.get_stat_df_static(stat, self.h1s, self.h2s, self.h3s)
+        return self.get_stat_df_static(stat, self.ftype, self.do_drop_self_comparisons, self.h1s, self.h2s, self.h3s)
 
 
 
@@ -544,6 +562,17 @@ class Dtest(Ftest):
     def get_stat_df(self,stat, zscores):
         return self.get_stat_df_static(stat, zscores, self.h1s, self.h2s, self.h3s, self.h4s, self.ftype)
 
+    @staticmethod
+    def drop_self_comparisons_static(stat_df, h1s, h2s, h3s, h4s):
+        dup_sample_indices = [(h1, h2, h3, h4) for h1 in h1s for h2 in h2s for h3 in h3s for h4 in h4s \
+                                                                    if h3==h1 or h3==h2 or h1==h2 or h3==h4 or h1==h4 or h2==h4]
+        df = stat_df.drop(dup_sample_indices)
+        return df
+
+    def drop_self_comparisons(self):
+        df = self.drop_self_comparisons_static(self.stat_df, self.h1s, self.h2s, self.h3s, self.h4s)
+        self.stat_df_drop = df
+        return self.stat_df_drop
 
 class calc:
     """
