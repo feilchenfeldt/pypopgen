@@ -40,56 +40,6 @@ class Test(object):
         return m.result
 
 
-class ComputeFstat(object):
-    """
-    Object to compute f statistic
-    and perform block jackknifing 
-    to obtain z-scores.
-
-    -------------
-    Parameters:
-    filename : vcf.gz filename. Should be tabix indexed
-                 for random access.
-    chromosomes : list of chromosome names as in the vcf file
-                    to run the analysis on
-
-    """    
-
-    ftypes = ('D', 'f3', 'f4', 'f4 ratio')
-
-    def __init__(self, vcf_filename, chromosomes):
-        self.vcf_filename = vcf_filename
-        self.chromosomes = chromosomes
-        self.tests = {}
-
-    def add_test(self, test_id, ftype='D',  **kwa):
-        """
-        Parameters:
-        test_id : id by which the test will be stored in 
-                    this objects test dictionary
-        ftype : type of tests such as D, f3, f4, f4 ratio.
-                See Class definition for all supported tests.
-        **kwa : See test Class description for test arguments.
-        """
-        assert ftype in self.ftypes, "Unknown ftype {}, allowed are {}".format(ftype, ftypes)
-        assert ftype == 'D', 'Only D statistic implemented so far.'
-        assert test_id not in self.tests.keys(), "Test id {} already exists. Delete or choose different name.".format(test_id)
-     
-
-        self.tests.update({test_id})
-
-    @staticmethod
-    def get_hap_df(t0, t1):
-        t0.columns = pd.MultiIndex.from_arrays(
-                [t0.columns, [0] * len(t0.columns)])
-        t1.columns = pd.MultiIndex.from_arrays(
-                [t1.columns, [1] * len(t1.columns)])
-        hap_df  = pd.concat([t0, t1], axis=1).sortlevel(axis=1)
-        hap_df = hap_df.dropna(axis=0)
-        return hap_df
-
-
-
 class Ftest(object):
     """
     This is the base class for f-tests. Specific
@@ -182,23 +132,6 @@ class Ftest(object):
 
 
 
-    def run(self):
-        if self.jackknife_level == 'chrom':
-            def calc_fstat_fun(chrom):
-                return vp.map_fly_reduce_haplo(self.vcf_filename, self.calc_stat, 
-                                        samples_h0=self.samples, samples_h1=self.samples,
-                                               chrom=chrom, start=1e6, end= 1e6+30000, 
-                                                fly_reduce_fun=self.fly_reduce_fun,
-                                                                chunksize=self.chunksize)
-
-        res = np.array(self.get_result_fun(self.map_fun(calc_fstat_fun, self.chromosomes)))
-        stat = self.get_stat(res)
-        zscores = self.get_zscores(res, stat)
-
-        stat_df = self.get_stat_df(stat, zscores)
-        self.stat_df = stat_df
-
-        return stat_df
 
     def map(self, chromosomes, start=None, end=None,
              map_fun=map, get_result_fun=lambda r:r, chunksize=50000):
@@ -231,16 +164,11 @@ class Ftest(object):
         #         'chunksize':self.chunksize,'mr_haplo_fun':vp.map_fly_reduce_haplo}    
         vcf_filename = self.vcf_filename
         ind_to_pop = self.ind_to_pop
-        h1s = self.h1s
-        h2s = self.h2s
-        h3s = self.h3s
-        h4s = self.h4s
         samples = self.samples
         fly_reduce_fun = self.fly_reduce_fun
-        #chunksize = self.chunksize
         mr_haplo_fun = vp.map_fly_reduce_haplo
 
-        calc_stat = self.get_calc_stat(ind_to_pop, h1s, h2s, h3s, h4s)
+        calc_stat = self.get_calc_stat(*self.calc_params)
 
         def calc_fstat_fun(chrom):
             return mr_haplo_fun(vcf_filename, calc_stat, 
@@ -363,11 +291,12 @@ class F3test(Ftest):
         self.h1s = h1s
         self.h2s = h2s
         self.h3s = h3s
-        self.h4s = None
         self.do_drop_self_comparisons = do_drop_self_comparisons
   
 
         Ftest.__init__(self, vcf_filename, ind_to_pop, **kwa)
+
+        self.calc_params = (self.ind_to_pop, self.h1s, self.h2s, self.h3s)
 
     @staticmethod
     def fly_reduce_fun(chunk_res, result=None):
@@ -464,10 +393,9 @@ class Dtest(Ftest):
         self.h3s = h3s
         self.h4s = h4s
 
-        self.test_fun = calc.d 
-  
-
         Ftest.__init__(self, vcf_filename, ind_to_pop, **kwa)
+
+        self.calc_params = (self.ind_to_pop, self.h1s, self.h2s, self.h3s, self.h4s)
 
     @staticmethod
     def fly_reduce_fun(chunk_res, result=None):
@@ -508,7 +436,7 @@ class Dtest(Ftest):
         if len(af):
             return calc.d(af[h1s], af[h2s], af[h3s], af[h4s])
         else:
-            return np.zeros((len(h1s),len(h2s),len(h3s),len(h4s)))
+            return np.zeros((len(h1s),len(h2s),len(h3s),len(h4s))), np.zeros((len(h1s),len(h2s),len(h3s),len(h4s)))
 
     @staticmethod
     def get_calc_stat(*args):
@@ -573,6 +501,89 @@ class Dtest(Ftest):
         df = self.drop_self_comparisons_static(self.stat_df, self.h1s, self.h2s, self.h3s, self.h4s)
         self.stat_df_drop = df
         return self.stat_df_drop
+
+
+
+
+class F4ratio(Dtest):
+    """
+    Parameters:
+    hs1s : list of sample names to use as h1
+    hs2s : list of sample names to use as h2
+    hs3s : list of sample names to use as h3
+    hs4s : list of sample names to use as h4
+    vcf_filename : vcf.gz filename. Should be tabix indexed
+                 for random access.
+    ind_to_pop : dictionary that maps individuals to populations
+                if each individual is its on population this can also
+                be a list of individuals
+    reduce_dim : If true, remove dimensions with length 1 (not implemented).
+
+
+     
+    reduce_dim : If true, remove dimensions with length 1 (not implemented).
+    jackknife_levels : 'chrom' ... weighted block-jackknife across whole chromosomes
+                       'chumk' ... block-jackknife across chunks of chunksize snps
+                                   This can be very memory intensive. 
+    """
+    ftype = 'F4ratio'
+
+    def __init__(self, vcf_filename, ind_to_pop, h1s, h2s, h3s, h4s, **kwa):
+        
+        Dtest.__init__(self, vcf_filename, ind_to_pop, h1s, h2s, h3s, h4s, **kwa)
+        
+        pop_to_hap = {pop:[] for pop in set(self.ind_to_pop.values())}
+
+
+        for s, pop in self.ind_to_pop.iteritems():
+            pop_to_hap[pop].append((s, 0))
+            pop_to_hap[pop].append((s, 1))
+            
+        hap_to_pop_ab = {}
+    
+        for h3 in h3s:
+            samples = pop_to_hap[h3]
+            sample_idx = np.arange(len(samples))
+            try:
+                ixa = np.random.choice(sample_idx, len(samples)/2, replace=False)
+            except ValueError, e:
+                print samples
+                print h3
+                raise e
+            ixb = [i for i in sample_idx if i not in ixa]
+            hap_to_pop_ab.update({samples[i]: h3 + '_a' for i in ixa})
+            hap_to_pop_ab.update({samples[i]: h3 + '_b' for i in ixb})
+       
+        self.hap_to_pop_ab = hap_to_pop_ab
+
+
+        self.calc_params = (self.ind_to_pop, self.hap_to_pop_ab, self.h1s, self.h2s, self.h3s, self.h4s)
+
+
+    @staticmethod
+    def get_af_hap(hap_df, hap_to_pop):
+        if len(hap_df):
+            af = hap_df.groupby(hap_to_pop, axis=1).mean()
+        else:
+            af = pd.DataFrame(columns=set(hap_to_pop.values()))
+        return af
+
+    @staticmethod
+    def calc_stat_static(chunk1, chunk2, ind_to_pop, hap_to_pop_ab, h1s, h2s, h3s, h4s):
+        hap_df = F4ratio.get_hap_df(chunk1, chunk2)
+        af = F4ratio.get_af(hap_df, ind_to_pop)
+        af_sub = F4ratio.get_af_hap(hap_df, hap_to_pop_ab)
+        if len(af):
+            return calc.f4ratio(af[h1s], af[h2s], af[h3s], af_sub[[h3+'_a' for h3 in h3s]], af_sub[[h3+'_b' for h3 in h3s]], af[h4s])
+        else:
+            return np.zeros((len(h1s),len(h2s),len(h3s),len(h4s))), np.zeros((len(h1s),len(h2s),len(h3s),len(h4s)))
+
+    @staticmethod
+    def get_calc_stat(*args):
+        def calc_stat(chunk1, chunk2):
+            return F4ratio.calc_stat_static(chunk1, chunk2, *args)
+        return calc_stat
+
 
 class calc:
     """
@@ -704,6 +715,41 @@ class calc:
                 + np.einsum('ij,ik,il,im->jklm',1-af1, af2, af3, 1-af4) \
                 - np.einsum('ij,ik,il,im->jklm',af1, 1-af2, af3, 1-af4))
 
+
+    @staticmethod
+    def f4ratio_denom(af1, af2, af3a, af3b, af4):
+        """
+        Calculate the f4 statistic as defined in
+        Patterson et al. Genetics 2012. This is 
+        the numerator in Patterson's D statistic.
+
+        Input is 4 np.ndarrays or pd.DataFrames
+        for each of which rows = SNPs,
+        columns = allele frequencies,
+        with data for all individuals/populations
+        which should
+        be tested for h1, h2, h3, h4, respectively.
+
+        Genotypes or haplotypes can be converted
+        to allele frequencies as 0, 0.5, 1 and 0, 1,
+        respectively.
+
+        Output is a four dimensional np.ndarray,
+        j x k x l x m, where the length of the 4 
+        axis is the number of individuals in af1,
+        af2, af3, af4, respectively. 
+        """
+
+        dummy = np.ones(af2.shape[1])
+
+        af3a = np.array(af3a)
+        af3b = np.array(af3b)
+
+        return (np.einsum('ij,k,il,im->jklm',af1, dummy, (1-af3a) * (1-af3b), af4) \
+                - np.einsum('ij,k,il,im->jklm',1-af1, dummy, af3a * (1-af3b), af4) \
+                + np.einsum('ij,k,il,im->jklm',1-af1, dummy, af3a * af3b, 1-af4) \
+                - np.einsum('ij,k,il,im->jklm',af1, dummy, (1-af3a) * af3b, 1-af4))
+
     @staticmethod
     def d_denom(af1, af2, af3, af4):
         """
@@ -756,6 +802,34 @@ class calc:
         af2, af3, af4, respectively.
         """
         return calc.f4(af1, af2, af3, af4), calc.d_denom(af1, af2, af3, af4)
+
+    @staticmethod
+    def f4ratio(af1, af2, af3, af3a, af3b, af4):
+        """
+        Calculate numerator and denominator of f4 
+        admixture ratio. See
+        Patterson et al. Genetics 2012.
+
+        Input is 5 np.ndarrays or pd.DataFrames
+        for each of which rows = SNPs,
+        columns = allele frequencies,
+        with data for all individuals/populations
+        which should
+        be tested for h1, h2, h3a, h3b, h4, respectively.
+
+        af3a and af3b should have the same dimension.
+        
+        Genotypes or haplotypes can be converted
+        to allele frequencies as 0, 0.5, 1 and 0, 1,
+        respectively.
+
+        Output is a four dimensional np.ndarray,
+        j x k x l x m, where the length of the 4
+        axis is the number of individuals in af1,
+        af2, af3, af4, respectively.
+        """
+        return calc.f4(af1, af2, af3, af4), calc.f4ratio_denom(af1, af2, af3a, af3b, af4)
+
 
 class convert:
     """
