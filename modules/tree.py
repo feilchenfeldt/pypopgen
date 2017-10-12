@@ -21,3 +21,33 @@ def dm_to_tree(dm):
     for c in tree.get_nonterminals():
         c.name = None
     return tree
+
+def get_local_tree(chrom, start, end, vcf_fn, samples=None, outgroup=None, plot=False):
+    pwd = hap.get_pairwise_diff(vcf_fn, chrom=chrom, start=start, end=end, samples=samples, chunksize=30000)
+    distance_triangular = [list(pwd.values[i,:i+1]) for i in range(len(pwd))]
+    dm = _DistanceMatrix(names= list(pwd.columns),
+                        matrix=distance_triangular)
+    constructor = DistanceTreeConstructor()
+    tree = constructor.nj(dm)
+    if outgroup is not None:
+        tree.root_with_outgroup(outgroup)
+    tree.ladderize()
+    for t in tree.get_nonterminals():
+        t.name = None
+    tree_no = copy.deepcopy(tree)
+    if outgroup is not None:
+        tree_no.prune(outgroup)
+    #tree_no.prune('AstTwe1')
+    #tree_no.prune('SerRob1')
+    if plot:
+        fig = plt.figure(figsize=(15,50))
+        ax = plt.gca()
+
+        Phylo.draw(tree_no, axes=ax, do_show=False)
+        ax.spines['left'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.spines['top'].set_visible(False)
+        ax.set_yticks([])
+        ax.set_ylabel('')
+    return pwd, tree
+

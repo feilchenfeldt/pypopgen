@@ -111,7 +111,7 @@ def plot_chrom_series(series,chrom_len,plotfun=None,grid=None,parent_gridelement
     if plotfun is None:
         plotfun = plt.plot
     if grid is None:
-        grid, parent_gridelement = get_chrom_grid(parent_gridelement=parent_gridelement)
+        grid, parent_gridelement = get_chrom_grid(chrom_lens=chrom_len,parent_gridelement=parent_gridelement)
     if fig is None:
         fig = plt.figure(1,figsize=(20,2))
     fig.subplots_adjust(wspace=0)
@@ -149,7 +149,7 @@ def plot_chrom_series(series,chrom_len,plotfun=None,grid=None,parent_gridelement
        # if chrom == 'CAE3':
             #print series.ix[chrom].index.values[~np.isnan(series.ix[chrom].values)]
         try:
-            chrom_series = series.ix[chrom]
+            chrom_series = series.loc[chrom]
         except KeyError:
             continue
         plotfun(chrom_series.index.values,chrom_series.values,'.',color=color1,rasterized=True,**kwa)
@@ -184,7 +184,7 @@ def plot_chrom_series(series,chrom_len,plotfun=None,grid=None,parent_gridelement
     if title is not None:
         plt.title(title)#, position=(0.5,1.02),va='bottom'
 
-    return fig, axes, grid
+    return fig, axes, grid, parent_gridelement
 
 def plot_features(gene_df,annotate=True,feature_name="symbol",ax=None,xlim=None):
     if ax is None:
