@@ -37,13 +37,15 @@ def add_info_line(info_dic, line):
         try:
             info_dic["uncategorised"].update(
                 {line.strip().split('=')[0][2:]: line.strip().split('=')[1]})
-        except KeyError:
+        except (KeyError, IndexError):
             try:
                 info_dic.update({"uncategorised": {line.strip().split('=')[
                                 0][2:]: line.strip().split('=')[1]}})
             except ValueError, e:
                 print line.strip().split('=')
                 raise e
+	    except IndexError:
+		pass
         return
     category = category[2:]
     tags = r.findall(value[:-1])
