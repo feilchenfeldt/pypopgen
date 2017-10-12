@@ -77,6 +77,47 @@ def phylo_from_str(tree_str):
     phylo_tree = Phylo.read(treeio, format='newick')
     return phylo_tree
 
+def consistent_with_tree(ete_tree, h1, h2, h3, h4):
+    """"
+    Returns True if the lineages have relationship
+       /-h4  
+      /
+     |   /-h3
+     |--|
+         |   /-h2
+          \-|
+             \-h1
+
+    and h1 != h2.
+    Returns False otherwise.
+    """
+    if h1 == h2:
+        return False
+    try:
+        h1h2 = ete_tree.get_common_ancestor([h1,h2])
+        h1h2h3 = ete_tree.get_common_ancestor([h1,h2,h3])
+        h1h2h3h4 = ete_tree.get_common_ancestor([h1,h2,h3,h4])
+    except ValueError:
+        #One of the samples not in tree.
+        return False
+    return bool(h1h2.get_distance(h1h2h3, topology_only=True)) \
+            & bool(h1h2h3.get_distance(h1h2h3h4, topology_only=True))
+
+def get_consistent_df(stat_df, ete_tree):
+        """
+        Get a data frame with the subset
+        of tuples that are consistent with a
+        given ete tree.
+        Parameters:
+        stat_df : data frame with f4-like statistics
+                  where index levels are [h1, h2, h3, h4]
+        ete_tree : ete3 tree object of all samples.
+                   Needs to be rooted and include
+                   all outgroups.
+        
+        """
+        consistent_tpls = [consistent_with_tree(ete_tree, *t) for t in stat_df.index.values]
+        return stat_df[consistent_tpls]
 
 #-------------------------------------------
 ###TREE PLOTTING AND VISUALISATION#########

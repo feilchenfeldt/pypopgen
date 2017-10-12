@@ -18,6 +18,7 @@ import pandas as pd
 
 #local modules
 import vcfpandas as vp
+import treetools
 
 logger = logging.getLogger()
 logging.basicConfig(
@@ -285,7 +286,7 @@ class F3test(Ftest):
                 be a list of individuals
     reduce_dim : If true, remove dimensions with length 1 (not implemented).
     """
-    ftype = 'f3'
+    ftype = 'F3'
 
     def __init__(self, vcf_filename, ind_to_pop, h3s, h1s, h2s, do_drop_self_comparisons=False, **kwa):
         self.h1s = h1s
@@ -409,25 +410,6 @@ class Dtest(Ftest):
         else:
             return (result[0] + chunk_res[0], result[1] + chunk_res[1], result[2] + 1) 
 
-#    def get_calc_stat(self):
-#        """
-#        """
-#        def calc_stat(chunk1, chunk2):
-#            hap_df = self.get_hap_df(chunk1, chunk2)
-#            af = self.get_af(hap_df, self.ind_to_pop)
-#            if len(af):
-#                return calc.d(af[self.h1s], af[self.h2s], af[self.h3s], af[self.h4s])
-#            else:
-#                return np.zeros((len(self.h1s),len(self.h2s),len(self.h3s),len(self.h4s)))
-#        return calc_stat
-#
-#    def calc_stat(self, chunk1, chunk2):
-#        hap_df = self.get_hap_df(chunk1, chunk2)
-#        af = self.get_af(hap_df, self.ind_to_pop)
-#        if len(af):
-#            return calc.d(af[self.h1s], af[self.h2s], af[self.h3s], af[self.h4s])
-#        else:
-#            return np.zeros((len(self.h1s),len(self.h2s),len(self.h3s),len(self.h4s)))
 
     @staticmethod
     def calc_stat_static(chunk1, chunk2, ind_to_pop, h1s, h2s, h3s, h4s):
@@ -502,6 +484,20 @@ class Dtest(Ftest):
         self.stat_df_drop = df
         return self.stat_df_drop
 
+    def get_consistent_with_tree(self, ete_tree):
+        """
+        Get a data frame with the subset
+        of tuples that are consistent with a
+        given ete tree.
+        Parameters:
+        ete_tree : ete3 tree object of all samples.
+                   Needs to be rooted and include
+                   all outgroups..
+        
+        """
+        self.stat_df_consist = get_consistent_df(self.stat_df, ete_tree)
+        return self.stat_df_consist
+
 
 
 
@@ -538,26 +534,12 @@ class F4ratio(Dtest):
         for s, pop in self.ind_to_pop.iteritems():
             pop_to_hap[pop].append((s, 0))
             pop_to_hap[pop].append((s, 1))
-            
-        hap_to_pop_ab = {}
+        
+        self.pop_to_hap = pop_to_hap
     
-        for h3 in h3s:
-            samples = pop_to_hap[h3]
-            sample_idx = np.arange(len(samples))
-            try:
-                ixa = np.random.choice(sample_idx, len(samples)/2, replace=False)
-            except ValueError, e:
-                print samples
-                print h3
-                raise e
-            ixb = [i for i in sample_idx if i not in ixa]
-            hap_to_pop_ab.update({samples[i]: h3 + '_a' for i in ixa})
-            hap_to_pop_ab.update({samples[i]: h3 + '_b' for i in ixb})
-       
-        self.hap_to_pop_ab = hap_to_pop_ab
 
-
-        self.calc_params = (self.ind_to_pop, self.hap_to_pop_ab, self.h1s, self.h2s, self.h3s, self.h4s)
+        self.calc_params = (self.ind_to_pop, self.pop_to_hap, self.h1s, self.h2s, 
+                                                                    self.h3s, self.h4s)
 
 
     @staticmethod
@@ -569,9 +551,24 @@ class F4ratio(Dtest):
         return af
 
     @staticmethod
-    def calc_stat_static(chunk1, chunk2, ind_to_pop, hap_to_pop_ab, h1s, h2s, h3s, h4s):
+    def calc_stat_static(chunk1, chunk2, ind_to_pop, pop_to_hap, h1s, h2s, h3s, h4s):
         hap_df = F4ratio.get_hap_df(chunk1, chunk2)
         af = F4ratio.get_af(hap_df, ind_to_pop)
+        #do the random subsets for each chunk independently
+        
+        hap_to_pop_ab = {}
+    
+        for h3 in h3s:
+            samples = pop_to_hap[h3]
+            sample_idx = np.arange(len(samples))
+            try:
+                ixa = np.random.choice(sample_idx, len(samples)/2, replace=False)
+            except ValueError, e:
+                raise e
+            ixb = [i for i in sample_idx if i not in ixa]
+            hap_to_pop_ab.update({samples[i]: h3 + '_a' for i in ixa})
+            hap_to_pop_ab.update({samples[i]: h3 + '_b' for i in ixb})
+
         af_sub = F4ratio.get_af_hap(hap_df, hap_to_pop_ab)
         if len(af):
             return calc.f4ratio(af[h1s], af[h2s], af[h3s], af_sub[[h3+'_a' for h3 in h3s]], af_sub[[h3+'_b' for h3 in h3s]], af[h4s])
@@ -583,6 +580,8 @@ class F4ratio(Dtest):
         def calc_stat(chunk1, chunk2):
             return F4ratio.calc_stat_static(chunk1, chunk2, *args)
         return calc_stat
+
+
 
 
 class calc:
