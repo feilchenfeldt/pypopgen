@@ -739,7 +739,8 @@ def get_info_dic(line):
     tags = [t for t in info_tuples if len(t)!=2]
 #    try:
     d = {k:v for (k,v) in info_tuples}
-    d.update({'_tags':tags})
+    if tags:
+        d.update({'_tags':tags})
 #    except ValueError:
 #        d = {}
 #        logging.warning("Can not parse info column at {}:{}".format(line[0],line[1]))
@@ -940,7 +941,7 @@ class TabixWrite(object):
             logging.info("Creating tabix index for {}".format(self.fh.name))
             tabix = subprocess.Popen(['tabix','-p',self.index,self.fh.name],stderr=subprocess.PIPE)
             out, err = tabix.communicate()
-            if self.tabix.returncode or err:
+            if tabix.returncode or err:
                 logging.warning("Failed to create tabix index for {}: {}".format(self.fh.name, err))
 
 class ReduceError(Exception):
@@ -1772,6 +1773,100 @@ class AddVariantsFromFasta(LineWriteParser):
                                                                 ":".join(sline[:2])))
             logging.debug("\t".join(sline[:8]))
         self.out_file.write("\t".join(sline)+'\n')
+
+class SvardalEtAl2017Formatting(LineWriteParser):
+    """
+    ***This parser does specific formatting for the VCFs for Svardal et al 2017. Should be generalized***
+    Filter a all sites vcf including outgroup alleles
+    as produced with AddVariantsFromFasta
+    to only retain variants with alternative allele
+    and PASS. Non seggregating variants (fixed diff wrt outgroup)
+    can fail the LowQual filter and still PASS.
+    """
+    args = {'contig':    {'required':False,
+                        'type':str,
+                        "help": 'Single ##contig tag to keep in header. '
+                        'Use -L to change what is parsed. Keeps all if option not given.'},
+            'out_file':{'required':True,
+                        'type':argparse.FileType('w'),
+                        'help':"Filepath to write output vcf to."}}
+
+    def __init__(self,**kwa):
+        self.pos = -1
+        self.ref = 'X'
+        self.alt = 'ABCD'
+
+
+    def header_fun(self, line):
+        ##contig=<ID=Scaffold1673,length=1388>
+        if self.contig is not None:
+            if line[:9] == "##contig=":
+                dic = get_header_line_dic(line)
+                if dic["ID"] != self.contig:
+                    return
+                else:
+                    line = line.replace("CAE",'')
+        if line[:13] == "##INFO=<ID=AA":
+            dic = get_header_line_dic(line)
+            line = line.replace("Character","String")
+        elif line[:17] == "##GATKCommandLine":
+            return
+        elif line[:12] == "##reference=":
+            line = "##reference=https://www.ncbi.nlm.nih.gov/assembly/GCF_000409795.2/\n"
+        elif line[:len("##FILTER=<ID=5bpIndel")] == "##FILTER=<ID=5bpIndel":
+            line = '##FILTER=<ID=5bpIndel,Description="Mask for reported indels +-5bp.">\n'
+        elif line[:len("##FILTER=<ID=ExCov")] == "##FILTER=<ID=ExCov":
+            line = '##FILTER=<ID=ExCov,Description="Mask for raw coverage over all individuals > 1.5x median for this chromosome.">\n'
+        elif line[:len("##FILTER=<ID=LowCov")] == "##FILTER=<ID=LowCov":
+            line = '##FILTER=<ID=LowCov,Description="Mask for raw coverage over all individuals < 1/2 median for this chromosme.">\n'
+        elif line[:len("##SnpEffCmd=")] == "##SnpEffCmd=":
+            return
+        self.out_file.write(line)
+
+
+    def parse_fun(self, sline):
+        def write(self, sline):
+            if self.pos != pos or  self.ref != ref or self.alt != alt:
+                sline[0] = sline[0].replace('CAE','')
+                self.out_file.write("\t".join(sline)+'\n')
+                self.pos = pos
+                self.ref = ref
+                self.alt = alt 
+
+        #print "Hallo"
+        pos = sline[1]
+        ref = sline[3]
+        alt = sline[4]
+        if alt != '.':
+            info_dic = get_info_dic(sline)
+            filt = sline[6]
+            if 'AC' in info_dic.keys():
+                if filt == 'PASS' or filt == "5bpIndel":
+                    alts = sline[4].split(',')
+                    acs = info_dic['AC'].split(',')
+                    #check wheter macacque allele was added
+                    if len(acs) < len(alts):
+                        acs.append('0')
+                        info_dic['AC'] = ','.join(acs)
+                        info_dic['AF'] = info_dic['AF'] + ',0.000'
+                    #to ensure alphabetic tag order
+                    new_info = ";".join(sorted(["{}={}".format(k,v) for k,v in info_dic.iteritems()]))
+                    sline[7] = new_info
+                    write(self, sline)
+            else:
+                if filt in ['PASS','LowQual']:
+                    if filt == 'LowQual':
+                        sline[6] = 'PASS'
+                    info_dic['AC'] = '0'
+                    info_dic['AF'] = '0.000'
+                    new_info = ";".join(sorted(["{}={}".format(k,v) for k,v in info_dic.iteritems()]))
+                    sline[7] = new_info
+                    write(self, sline)
+
+    def output_fun(self):
+        #This should be done centrally.
+        #Not sure how this behaves with parallel parsing
+        self.out_file.close()
 
 
 class AddGenotypeFromFasta(LineWriteParser):
