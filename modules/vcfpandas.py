@@ -37,13 +37,15 @@ def add_info_line(info_dic, line):
         try:
             info_dic["uncategorised"].update(
                 {line.strip().split('=')[0][2:]: line.strip().split('=')[1]})
-        except KeyError:
+        except (KeyError, IndexError):
             try:
                 info_dic.update({"uncategorised": {line.strip().split('=')[
                                 0][2:]: line.strip().split('=')[1]}})
             except ValueError, e:
                 print line.strip().split('=')
                 raise e
+	    except IndexError:
+		pass
         return
     category = category[2:]
     tags = r.findall(value[:-1])
@@ -112,6 +114,52 @@ def map_reduce_haplo(fn, fun, samples_h0=None, samples_h1=None, chrom=None,
     # reduce
     result = reduce_fun([get_result_fun(r) for r in results]
                         if get_result_fun is not None else results)
+
+    return result
+
+
+def map_fly_reduce_haplo(fn, fun, samples_h0=None, samples_h1=None, chrom=None,
+                     start=None, end=None, chunksize=50000, apply_fun=None,
+                     get_result_fun=None, fly_reduce_fun=None, **read_args):
+    """
+    Read haplotypes from specific region tabixed vcf.gz file
+    and apply function.
+
+    Reduces on the fly by applying reduce function after each 
+    chunk.
+
+    """
+    if apply_fun is None:
+        def apply_fun(fun, chunk0, chunk1):
+            return fun(chunk0, chunk1)
+    if fly_reduce_fun is None:
+        def fly_reduce_fun(chunk_res, result=None):
+            if result is None:
+                return chunk_res
+            else:
+                return result + chunk_res
+
+    header, _ = parse_vcf_header(fn)
+
+    if samples_h0 is None and samples_h1 is None:
+        samples_h0 = header[9:]
+        samples_h1 = header[9:]
+    elif samples_h0 is None:
+        samples_h0 = []
+        samples_h1 = [str(s) for s in samples_h1]
+    elif samples_h1 is None:
+        samples_h1 = []
+        samples_h0 = [str(s) for s in samples_h0]
+
+    t0 = get_vcf_df(fn, chrom=chrom, start=start, end=end, header=header, usecols=['CHROM', 'POS'] + samples_h0,
+                    converters=converters.first_haplotype(samples_h0), chunksize=chunksize, **read_args)
+    t1 = get_vcf_df(fn, chrom=chrom, start=start, end=end, header=header, usecols=['CHROM', 'POS'] + samples_h1,
+                    converters=converters.second_haplotype(samples_h1), chunksize=chunksize, **read_args)
+
+    result = None
+    for chunk0, chunk1 in itertools.izip(t0, t1):
+        result = fly_reduce_fun(apply_fun(fun, chunk0, chunk1), result)
+        gc.collect()
 
     return result
 
@@ -305,3 +353,37 @@ def get_genotype_df(fn, chrom, start=None, end=None, header=None, samples=None):
                         converters=converters.genotype_converter(samples))
 
     return vcf_df
+
+
+def get_haplotype_df(fn,  chrom=None,
+                     start=None, end=None, samples=None, samples_h0=None, samples_h1=None,  **read_args):
+    """
+    Read haplotypes from specific region tabixed vcf.gz file.
+
+    """
+    header, _ = parse_vcf_header(fn)
+
+    if samples is not None:
+        assert (samples_h0 is None) and (samples_h1 is None)
+        samples_h0 = samples
+        samples_h1 = samples
+    else:
+        assert (samples_h0 is None) == (samples_h1 is None)
+        if samples_h1 is None:        
+            samples_h0 = header[9:]
+            samples_h1 = header[9:]
+
+
+    t0 = get_vcf_df(fn, chrom=chrom, start=start, end=end, header=header, usecols=['CHROM', 'POS'] + samples_h0,
+                    converters=converters.first_haplotype(samples_h0),  **read_args)
+    t1 = get_vcf_df(fn, chrom=chrom, start=start, end=end, header=header, usecols=['CHROM', 'POS'] + samples_h1,
+                    converters=converters.second_haplotype(samples_h1), **read_args)
+
+    t0.columns = pd.MultiIndex.from_arrays(
+            [t0.columns, [0] * len(t0.columns)])
+    t1.columns = pd.MultiIndex.from_arrays(
+            [t1.columns, [1] * len(t1.columns)])
+    hap_df  = pd.concat([t0, t1], axis=1).sortlevel(axis=1)
+
+
+    return hap_df

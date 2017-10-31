@@ -719,7 +719,7 @@ def dstat_chunk(gen_df, quadruples, populations):
     for j, (h1, h2, h3, o) in enumerate(quadruples):
 
         dstat = pd.DataFrame(columns=['num', 'denom'])
-        dstat['num'] = ((af[h1] - af[h2]) * (af[h3] - af[o])).dropna()
+        dstat['num'] = ((-af[h1] + af[h2]) * (af[h3] - af[o])).dropna()
 
         dstat['denom'] = ((af[h1] + af[h2] - 2 * af[h1] * af[h2])
                           * (af[h3] + af[o] - 2 * af[h3] * af[o])).dropna()
@@ -1057,10 +1057,38 @@ def reduce_fstat_chunks(chunk_fstats):
 
     return fs, zscores
 
+def reduce_dstat_chunks(chunk_dstats):
+    """
+    """
+
+    
+    def calc_d_jackknife(chunk_dstats,i=-np.inf):
+        """
+        leave jackknife_index out
+        """
+        jack = np.sum(chunk_dstats[np.arange(len(chunk_dstats))!=i][:,:,0],axis=0)/\
+               np.sum(chunk_dstats[np.arange(len(chunk_dstats))!=i][:,:,1],axis=0)
+        return jack
+
+    chunk_dstats = np.array(chunk_dstats)
+
+    ds = calc_d_jackknife(chunk_dstats)
+
+    jackknife_estimates = [calc_d_jackknife(chunk_dstats,i) for i in range(len(chunk_dstats))]
+
+    zscores = ds / \
+            (np.std(jackknife_estimates, axis=0)
+             * np.sqrt(len(jackknife_estimates)-1))
+
+    return ds, zscores
 
 def reduce_fstat_map(result):
     r = reduce(lambda a,b: a+b, result)
     return reduce_fstat_chunks(r)
+
+def reduce_dstat_map(result):
+    r = reduce(lambda a,b: a+b, result)
+    return reduce_dstat_chunks(r)
 
 
 def get_fstat_df_chunk(fs, Zs, quadruples, controlsamples_h3, controlsamples_h2):
