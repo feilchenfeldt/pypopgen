@@ -22,7 +22,7 @@ __version__ = '0.1'
 __author__ = 'Hannes Svardal'
 
 # global imports
-import logging
+import logging, copy
 import pathos.multiprocessing as mp
 import pandas as pd
 import numpy as np
@@ -211,7 +211,76 @@ def plot_residuals(residuals, tree, pwd):
     return fig
 
 #-------------------------------------------
-###TREE PLOTTING AND VISUALISATION#########
+###F-branch and F-stat reduction#########
 #-------------------------------------------
 
+def get_fmin_tree(f_df, tree):
 
+    """
+    """
+
+    f = f_df[f_df['F4ratio']>=0].reset_index()
+
+    t = copy.deepcopy(tree)
+
+    i=0
+    for node in  t.traverse():
+        if node.children:
+            l = node.children[0]
+            r = node.children[1]
+            lleaves = l.get_leaf_names()
+            rleaves = r.get_leaf_names()
+
+            node_fl = f[f['h2'].isin(lleaves)&f['h1'].isin(rleaves)]
+            node_fr = f[f['h2'].isin(rleaves)&f['h1'].isin(lleaves)]
+
+
+
+            for side, node_f, sister_f in [(0,node_fl, node_fr),(1,node_fr, node_fl)]:
+                if len(node_f) or len(sister_f):
+
+                    sister_f0 = sister_f.rename(columns={'h1':'h2','h2':'h1'})
+                    sister_f0['F4ratio'] = 0
+                    sister_f0['Z'] = 0
+                    nf = pd.concat([node_f, sister_f0])
+
+                    #node_f.sort_values('|f|', ascending=False)
+                    #only take h3 with maximum mean '|f|' on this branch
+                    #h3 = node_f.groupby('h3').mean().sort_values('|f|', ascending=False).iloc[0].name
+                    #node_f1 = node_f[node_f['h3']==h3]
+                    child = node.get_children()[side]
+
+                    #child.add_feature('rscore', summary(node_f1['|f|']))
+                    #child.add_feature('h3', h3)
+                    child.add_feature('branch_f', nf.groupby(['h2','h3']).min().reset_index())
+
+    return t
+
+def get_node_name(node):
+    if node.is_leaf():
+        return node.name
+    else:
+        return str(",".join(["".join([n[0] for n in c.get_leaf_names()]) for c in node.get_children()]))
+
+def try_get_f(node, taxa, statistic='F4ratio', cp_summary=np.nanmean):
+    if hasattr(node, 'branch_f'):
+        h3groups = node.branch_f.groupby('h3')
+        h3_summary = h3groups.apply(lambda df: cp_summary(df[statistic].values))
+        return h3_summary.ix[taxa]
+    else:
+        return pd.Series({t:np.nan for t in taxa})
+
+def get_branch_mat(rscore_tree, statistic='F4ratio',cp_summary=np.nanmean):
+    """
+    Tree without outgroup.
+    """
+    taxa = rscore_tree.get_leaf_names()
+    branch_mat_df = pd.DataFrame()
+    for node in rscore_tree.iter_descendants('preorder'):
+        node_name = get_node_name(node)
+        while node_name in branch_mat_df.columns:
+            node_name = node_name + '0'
+        branch_mat_df.loc[:,node_name] = try_get_f(node, taxa, statistic=statistic, cp_summary=cp_summary)#cp_summary=np.nanmax
+    branch_mat = branch_mat_df.T.loc[:,taxa]
+    branch_mat = branch_mat.iloc[::-1,:]
+    return branch_mat

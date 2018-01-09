@@ -44,6 +44,11 @@ def add_info_line(info_dic, line):
             except ValueError, e:
                 print line.strip().split('=')
                 raise e
+        except IndexError:
+            try:
+                info_dic["unparsable"].update(line.strip())
+            except KeyError:
+                info_dic.update({"unparsable":line.strip()})
         return
     category = category[2:]
     tags = r.findall(value[:-1])

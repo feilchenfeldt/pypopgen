@@ -1513,7 +1513,7 @@ def get_branch_mat(rscore_tree, statistic='|f|',cp_summary=np.nanmean):
     branch_mat_df = pd.DataFrame()
     for node in rscore_tree.iter_descendants('preorder'):
         node_name = get_node_name(node)
-        if node_name in branch_mat_df.columns:
+        while node_name in branch_mat_df.columns:
             node_name = node_name + '0'
         branch_mat_df.loc[:,node_name] = try_get_f(node, taxa, statistic=statistic, cp_summary=cp_summary)#cp_summary=np.nanmax
     branch_mat = branch_mat_df.T.loc[:,taxa]

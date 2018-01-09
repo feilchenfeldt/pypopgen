@@ -61,6 +61,7 @@ class Ftest(object):
 
     def __init__(self, vcf_filename,
                 ind_to_pop=None,
+                result_filebase=None,
                 reduce_dim=False):
         
 
@@ -73,7 +74,7 @@ class Ftest(object):
             self.samples = ind_to_pop.keys()
 
         self.ind_to_pop = ind_to_pop
-        
+        self.result_filebase = result_filebase
 
     @staticmethod
     def get_hap_df(t0, t1):
@@ -135,7 +136,8 @@ class Ftest(object):
 
 
     def map(self, chromosomes, start=None, end=None,
-             map_fun=map, get_result_fun=lambda r:r, chunksize=50000):
+             map_fun=map, get_result_fun=lambda r:r, chunksize=50000,
+             return_result=True, save_result=False):
         """
         chromosomes : list of chromosome names as in the vcf file
                         to run the analysis on
@@ -152,10 +154,21 @@ class Ftest(object):
                   For map this would simply be the identity (default)
                   or for ipython parallel lv.map_async it is
                   lambda r: r.result() (or lambda r: r.result for older versions) 
-        chunksize : number of lines in the input vcf to read per chunk
+        chunksize : Number of lines in the input vcf to read per chunk
                     if jackknife_levels is 'chunk' this also determines
                     the block-jackknife block.
+        return_result : Whether to return the result for each chromosme
+                        to the mapping function. For very large results
+                        it can be more stable and memory efficient to 
+                        set return_result=False and save_result=True 
+        save_result : whether or not to save the result for each chromosome
+                      to disk
         """
+        assert return_result or save_result
+        if save_result:
+            assert self.result_filebase is not None
+        result_filebase = self.result_filebase
+        self.chromosomes = chromosomes
         self.get_result_fun = get_result_fun
         #calc_stat = lambda chunk1, chunk2: self.calc_stat_static(chunk1, chunk2, ind_to_pop, h1s, h2s, h3s, h4s)        
         #params = {'vcf_filename':self.vcf_filename,
@@ -170,18 +183,31 @@ class Ftest(object):
         mr_haplo_fun = vp.map_fly_reduce_haplo
 
         calc_stat = self.get_calc_stat(*self.calc_params)
-
+        
         def calc_fstat_fun(chrom):
-            return mr_haplo_fun(vcf_filename, calc_stat, 
+            r = mr_haplo_fun(vcf_filename.format(chrom), calc_stat, 
                                         samples_h0=samples, samples_h1=samples,
                                                chrom=chrom, start=start, end=end, 
                                                 fly_reduce_fun=fly_reduce_fun,
-                                                                chunksize=chunksize)
+                                                               chunksize=chunksize)
+            if save_result:
+                np.save(result_filebase+'_'+str(chrom), r)
+            #return_result = True
+            if return_result:
+                return r 
         self.map_result =  map_fun(calc_fstat_fun, chromosomes)
         return self.map_result
 
     def progress(self):
         return self.map_result.progress
+
+    def load_result_chrom(self, chrom):
+        r = np.load(self.result_filebase+'_'+str(chrom)+'.npy')
+        return r
+
+    def load_result(self):
+        res = np.array([self.load_result_chrom(c) for c in self.chromosomes])
+        return res
 
     def get_result(self):
         #try:
@@ -189,8 +215,12 @@ class Ftest(object):
         #except TimeoutError:
         #    logger.INFO('Not finished, status is: {}'.format({i:s.count(i) for i in set(s)}))
         #    return
-
-        res = np.array(self.get_result_fun(self.map_result))
+        try:
+            res = np.array(self.get_result_fun(self.map_result))
+        except AttributeError:
+            res = self.load_result()
+        if res[0] is None:
+            res = self.load_result()
         stat = self.get_stat(res)
         zscores = self.get_zscores(res, stat)
 
@@ -296,7 +326,7 @@ class F3test(Ftest):
   
 
         Ftest.__init__(self, vcf_filename, ind_to_pop, **kwa)
-
+        
         self.calc_params = (self.ind_to_pop, self.h1s, self.h2s, self.h3s)
 
     @staticmethod
@@ -495,7 +525,7 @@ class Dtest(Ftest):
                    all outgroups..
         
         """
-        self.stat_df_consist = get_consistent_df(self.stat_df, ete_tree)
+        self.stat_df_consist = treetools.get_consistent_df(self.stat_df, ete_tree)
         return self.stat_df_consist
 
 
