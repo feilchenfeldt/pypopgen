@@ -161,6 +161,10 @@ def map_fly_reduce_haplo(fn, fun, samples_h0=None, samples_h1=None, chrom=None,
 
     result = None
     for chunk0, chunk1 in itertools.izip(t0, t1):
+        chunk0.columns = pd.MultiIndex.from_arrays(
+                [chunk0.columns, [0] * len(chunk0.columns)])
+        chunk1.columns = pd.MultiIndex.from_arrays(
+                [chunk1.columns, [1] * len(chunk1.columns)])
         result = fly_reduce_fun(apply_fun(fun, chunk0, chunk1), result)
         gc.collect()
 
@@ -371,10 +375,13 @@ def get_haplotype_df(fn,  chrom=None,
         samples_h0 = samples
         samples_h1 = samples
     else:
-        assert (samples_h0 is None) == (samples_h1 is None)
-        if samples_h1 is None:        
-            samples_h0 = header[9:]
-            samples_h1 = header[9:]
+        samples_h0 = samples_h0 if samples_h0 is not None else []
+        samples_h1 = samples_h1 if samples_h1 is not None else []
+
+    #    assert (samples_h0 is None) == (samples_h1 is None)
+    #    if samples_h1 is None:        
+    #        samples_h0 = header[9:]
+    #        samples_h1 = header[9:]
 
 
     t0 = get_vcf_df(fn, chrom=chrom, start=start, end=end, header=header, usecols=['CHROM', 'POS'] + samples_h0,

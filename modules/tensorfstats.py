@@ -62,7 +62,7 @@ class Ftest(object):
     def __init__(self, vcf_filename,
                 ind_to_pop=None,
                 result_filebase=None,
-                reduce_dim=False):
+                reduce_dim=False, haploid=False):
         
 
         self.vcf_filename = vcf_filename
@@ -75,6 +75,7 @@ class Ftest(object):
 
         self.ind_to_pop = ind_to_pop
         self.result_filebase = result_filebase
+        self.haploid = haploid
 
     @staticmethod
     def get_hap_df(t0, t1):
@@ -83,10 +84,12 @@ class Ftest(object):
         per individual and combines them to per
         population allele frequencies.
         """
-        t0.columns = pd.MultiIndex.from_arrays(
-                [t0.columns, [0] * len(t0.columns)])
-        t1.columns = pd.MultiIndex.from_arrays(
-                [t1.columns, [1] * len(t1.columns)])
+#        if len(t0):
+#            t0.columns = pd.MultiIndex.from_arrays(
+#                    [t0.columns, [0] * len(t0.columns)])
+#        if len(t1):
+#            t1.columns = pd.MultiIndex.from_arrays(
+#                    [t1.columns, [1] * len(t1.columns)])
         hap_df  = pd.concat([t0, t1], axis=1).sortlevel(axis=1)
         hap_df = hap_df.dropna(axis=0)
         return hap_df
@@ -186,7 +189,8 @@ class Ftest(object):
         
         def calc_fstat_fun(chrom):
             r = mr_haplo_fun(vcf_filename.format(chrom), calc_stat, 
-                                        samples_h0=samples, samples_h1=samples,
+                                        samples_h0=samples, 
+                                        samples_h1=samples if not self.haploid else None,
                                                chrom=chrom, start=start, end=end, 
                                                 fly_reduce_fun=fly_reduce_fun,
                                                                chunksize=chunksize)
@@ -232,6 +236,7 @@ class Ftest(object):
 
 class PairwiseDiff(Ftest):
     """
+
     Parameters:
     hs1s : list of sample names to use as h1
     hs2s : list of sample names to use as h2
@@ -254,6 +259,7 @@ class PairwiseDiff(Ftest):
   
 
         Ftest.__init__(self, vcf_filename, ind_to_pop, **kwa)
+        self.calc_params = (self.ind_to_pop, self.h1s, self.h2s)
 
     @staticmethod
     def fly_reduce_fun(chunk_res, result=None):
@@ -466,10 +472,12 @@ class Dtest(Ftest):
         return d
 
     @staticmethod
-    def get_zscores(res, d):
+    def get_zscores(res, d, weights=None):
         jackknife_estimates = [Dtest.jackknife(res, i) for i in np.arange(len(res))]
-        average = np.average(jackknife_estimates, axis=0, weights=res[:,2]*1./np.sum(res[:,2]))
-        variance = np.average(1.*(jackknife_estimates - average)**2, axis=0, weights=res[:,2]*1./np.sum(res[:,2])).astype(float)
+        if weights is None:
+            weights = res[:,2]*1./np.sum(res[:,2])
+        average = np.average(jackknife_estimates, axis=0, weights=weights)
+        variance = np.average(1.*(jackknife_estimates - average)**2, axis=0, weights=weights).astype(float)
         try:
             zscores = d * 1. / ( np.sqrt(variance) * np.sqrt(len(jackknife_estimates)-1) )
         except AttributeError, e:
@@ -631,6 +639,10 @@ class calc:
     @staticmethod
     def pwd(af1, af2):
         """
+        ATTENTION pi needs to be corrected for resampling
+            similar to f3!!!!!!
+
+
         Calculate pairwise differences (pi and dxy).
         
         Input can be np.ndarray or pd.DataFrame.
