@@ -10,6 +10,11 @@ currently done across whole chromosomes.
 F-test was compared to previous implementation (which was checked
 against Admixtols). Results were extremely close, e.g.: D +- 0.25%
 
+To run map function of these classes with ipython parallel or 
+multiprocessing, one might need to use a pickling tool other than
+the standard pickling module. The module dill works fine for me.
+
+
 """
 
 import logging
@@ -39,6 +44,8 @@ class Test(object):
         m = lv.map_async(lambda c: x, range(5))
         #return m.result
         return m.result
+
+
 
 
 class Ftest(object):
@@ -188,10 +195,10 @@ class Ftest(object):
         calc_stat = self.get_calc_stat(*self.calc_params)
         
         def calc_fstat_fun(chrom):
-            r = mr_haplo_fun(vcf_filename.format(chrom), calc_stat, 
+            r = mr_haplo_fun(vcf_filename.format(str(chrom)), calc_stat, 
                                         samples_h0=samples, 
                                         samples_h1=samples if not self.haploid else None,
-                                               chrom=chrom, start=start, end=end, 
+                                               chrom=str(chrom), start=start, end=end, 
                                                 fly_reduce_fun=fly_reduce_fun,
                                                                chunksize=chunksize)
             if save_result:
@@ -200,6 +207,7 @@ class Ftest(object):
             if return_result:
                 return r 
         self.map_result =  map_fun(calc_fstat_fun, chromosomes)
+        #self.map_result = 'bla'
         return self.map_result
 
     def progress(self):
@@ -249,17 +257,18 @@ class PairwiseDiff(Ftest):
     """
     ftype = 'pwd'
 
-    def __init__(self, vcf_filename, ind_to_pop, h1s, h2s, **kwa):
+    def __init__(self, vcf_filename, ind_to_pop, h1s, **kwa):
         self.h1s = h1s
-        self.h2s = h2s
+        self.h2s = None
         self.h3s = None
         self.h4s = None
 
-        self.test_fun = calc.pwd
-  
+        for k,v in ind_to_pop.iteritems():
+            if v not in h1s:
+                del ind_to_pop[k]
 
         Ftest.__init__(self, vcf_filename, ind_to_pop, **kwa)
-        self.calc_params = (self.ind_to_pop, self.h1s, self.h2s)
+        self.calc_params = (self.ind_to_pop, self.h1s)
 
     @staticmethod
     def fly_reduce_fun(chunk_res, result=None):
@@ -272,13 +281,15 @@ class PairwiseDiff(Ftest):
             return result + chunk_res 
 
     @staticmethod
-    def calc_stat_static(chunk1, chunk2, ind_to_pop, h1s, h2s, *args):
+    def calc_stat_static(chunk1, chunk2, ind_to_pop, h1s, *args):
         hap_df = Ftest.get_hap_df(chunk1, chunk2)
-        af = Ftest.get_af(hap_df, ind_to_pop)
-        if len(af):
-            return calc.pwd(af[h1s], af[h2s])
+        if len(hap_df):
+            groups = hap_df.groupby(ind_to_pop, axis=1, level=0)
+            #ids = groups.apply(lambda df:np.nan).index.values
+            return calc.divergence(groups)
         else:
-            return np.zeros((len(h1s),len(h2s)))
+            return np.zeros((hap_df.shape[1]/2,
+                                 hap_df.shape[1]/2))
 
     @staticmethod
     def get_calc_stat(*args):
@@ -299,11 +310,12 @@ class PairwiseDiff(Ftest):
         return None
 
     @staticmethod
-    def get_stat_df_static(pwd, h1s, h2s):
-        return pd.DataFrame(pwd, index=h1s, columns=h2s)
+    def get_stat_df_static(pwd, ind_to_pop):
+        s = sorted(set(ind_to_pop.values()))
+        return pd.DataFrame(pwd, index=s, columns=s)
 
     def get_stat_df(self, stat, zscores):
-        return self.get_stat_df_static(stat, self.h1s, self.h2s)
+        return self.get_stat_df_static(stat, self.ind_to_pop)
 
 
 
@@ -660,32 +672,122 @@ class calc:
 
         return np.einsum('ij,ik->jk',af1, 1-af2) + np.einsum('ij,ik->jk',1-af1, af2)
 
+
+
+
+
+#    @staticmethod
+#    def pwd0(af_df):
+#        """
+#        Calculate pairwise differences (pi and dxy).
+#        
+#        Input can be np.ndarray or pd.DataFrame.
+#        Rows are allele frequencies or haplotypes for variants.
+#        Columns are individuals or populations.
+#
+#        Rows containing np.nan should be removed beforehand.
+#
+#        Result:
+#        Diagonal entries are pi = 2p(1-p).
+#        Off-diagonal entries are dxy = pq
+#
+#
+#        """
+#        pw_af = np.einsum('ij,ik->jk',af_df, 1-af_df)
+#        
+#        try:
+#            pw_af = pd.DataFrame(pw_af, index = af_df.columns, columns = af_df.columns)
+#        except AttributeError:
+#            pass    
+#
+#        return pw_af + pw_af.T
+ 
+
     @staticmethod
-    def pwd0(af_df):
+    def divergence(groups):
         """
         Calculate pairwise differences (pi and dxy).
-        
-        Input can be np.ndarray or pd.DataFrame.
-        Rows are allele frequencies or haplotypes for variants.
-        Columns are individuals or populations.
 
+        This function returns an unbiased estimate 
+        for pi.
+   
         Rows containing np.nan should be removed beforehand.
-
+        
+        Parameters:
+        groups ... grouped pandas dataframe that is grouped into
+                   populations. Populations could also be the 
+                   two haplotypes of a single indiviudal.
         Result:
-        Diagonal entries are pi = 2p(1-p).
-        Off-diagonal entries are dxy = pq
-
+         pd.DataFrame of nucleotide diversity pi (diagonal)
+         and divergence dxy (off-diagonal) 
+         Diagonal entries are pi = 2p(1-p*), 
+                        where p* = (allele count - 1) / (n samples - 1)
+         Off-diagonal entries are dxy = p1*(1-p2) + (1-p1)*p2
 
         """
-        pw_af = np.einsum('ij,ik->jk',af_df, 1-af_df)
-        
-        try:
-            pw_af = pd.DataFrame(pw_af, index = af_df.columns, columns = af_df.columns)
-        except AttributeError:
-            pass    
+        af = groups.mean()
+        ac = groups.sum()
+        n = groups.apply(lambda df: df.notnull().sum(axis=1))
+        pi =  np.zeros((af.shape[1], af.shape[1]))
+        np.fill_diagonal(pi,(2*af*(1-(ac-1.)/(n-1))).sum())
+        dxy = np.einsum('ij,ik->jk',af, 1-af) + np.einsum('ij,ik->jk',1-af, af)
+        np.fill_diagonal(dxy, 0)
+        divergence = pi + dxy
+        return divergence
 
-        return pw_af + pw_af.T
- 
+
+    @staticmethod
+    def f2(groups1, groups2):
+        """
+        Calculate the f3 statistic as defined in
+        Patterson et al. Genetics 2012. This is 
+        the numerator in Patterson's D statistic.
+
+        This corresponds to the unbiased estimator
+        in Patterson et al. 2012 Appendix A.
+
+        af3 corresponds to population 'C' in 
+        Patterson et al.
+
+        Input is 3 np.ndarrays or pd.DataFrames
+        for each of which rows = SNPs,
+        columns = allele frequencies,
+        with data for all individuals/populations
+        which should
+        be tested for h1, h2, h3, respectively.
+
+        Genotypes or haplotypes can be converted
+        to allele frequencies as 0, 0.5, 1 and 0, 1,
+        respectively.
+
+        Output is a three dimensional np.ndarray,
+        j x k x l, where the length of the 3 
+        axis is the number of individuals in af2,
+        af1, af2, respectively. 
+        """
+
+        af1 = groups1.mean()
+        af2 = groups2.mean()
+        n1 = groups1.apply(lambda df: df.notnull().sum(axis=1))
+        n2 = groups2.apply(lambda df: df.notnull().sum(axis=1))
+        dummy1 = np.ones(af1.shape[1])
+        dummy2 = np.ones(af2.shape[1])
+
+        r =  - 2 * np.einsum('ij,ik->jk',af1, af2) \
+               + np.einsum('ij,ij,k->jk',af1, af1-(1-af1)/(n1-1), dummy2)  \
+               + np.einsum('j,ik,ik->jk',dummy1, af2, af2-(1-af2)/(n2-1))
+        f2_s = pd.Series(r.flatten(), 
+                          index= pd.MultiIndex.from_tuples([(h1,h2) \
+                               for h1 in af1.columns for h2 in af2.columns]))
+        f2_s.index.names = ['h1','h2']
+
+        # The estimator above is unbiased, except for self-comparisons.
+        # Self-comparisons should be zero by definition
+        f2_s[f2_s.index.get_level_values(0) == f2_s.index.get_level_values(1)] = 0
+
+        return f2_s
+
+
     @staticmethod
     def f3(ac3, n3, af1, af2):
         """
@@ -725,8 +827,63 @@ class calc:
                 - np.einsum('ij,k,il->jkl',af3, dummy1, af2) \
                 + np.einsum('j,ik,il->jkl',dummy3, af1, af2)
         
+    @staticmethod
+    def f3b(groups3, groups1, groups2):
+        """
+        Calculate the f3 statistic as defined in
+        Patterson et al. Genetics 2012. This is 
+        the numerator in Patterson's D statistic.
+
+        This corresponds to the unbiased estimator
+        in Patterson et al. 2012 Appendix A.
+        However, it is not unbiased for entries
+        where group1 and group2 correspond to
+        the identical population. To get an un-biased
+        estimate for such cases use f2. f3 reduced to
+        f2 if 1==2.
+
+        af3 corresponds to population 'C' in 
+        Patterson et al.
+
+        Input is 3 pd.DataFrames grouped into populations
+        using DataFrame.groupby.
+        In the original data frame rows = SNPs,
+        columns = haplotypes,
+        with data for all individuals/populations
+        which should
+        be tested for h1, h2, h3, respectively.
+
+        Returns:
+        A pandas Series with a 3-level index,
+        corresponding to h3, h1, h2 taken from groups3,
+        groups1, groups2, respectively.
+
+        """
 
 
+        af1 = groups1.mean()
+        af2 = groups2.mean()
+        af3 = groups3.mean() 
+        n3 = groups3.apply(lambda df: df.notnull().sum(axis=1))
+
+        dummy3 = np.ones(af3.shape[1])
+        dummy1 = np.ones(af1.shape[1])
+        dummy2 = np.ones(af2.shape[1])
+
+        r = np.einsum('ij,ij,k,l->jkl',af3, af3-(1-af3)/(n3-1), dummy1, dummy2)  \
+                - np.einsum('ij,ik,l->jkl',af3, af1, dummy2) \
+                - np.einsum('ij,k,il->jkl',af3, dummy1, af2) \
+                + np.einsum('j,ik,il->jkl',dummy3, af1, af2)
+        f3_s = pd.Series(r.flatten(), 
+                          index= pd.MultiIndex.from_tuples([(h3,h1,h2) for h3 in af3.columns \
+                                                           for h1 in af1.columns for h2 in af2.columns]))
+        f3_s.index.names = ['h3','h1','h2']
+        # correct entries where group3 is idential to one of the other groups
+        # should be 0 in such a case
+        f3_s[ (f3_s.index.get_level_values(0) == f3_s.index.get_level_values(1)) | \
+              (f3_s.index.get_level_values(0) == f3_s.index.get_level_values(2))] = 0
+
+        return f3_s
 
     @staticmethod
     def f4(af1, af2, af3, af4):
