@@ -63,6 +63,11 @@ class Ftest(object):
                 if each individual is its on population this can also
                 be a list of individuals
     reduce_dim : If true, remove dimensions with length 1 (not implemented).
+
+    TODO:
+    Samples should be defined from the h1s, h2s etc
+    so that samples in ind_to_pop that are not needed are ignored...
+
     """
     ftype = None
 
@@ -263,10 +268,15 @@ class PairwiseDiff(Ftest):
         self.h3s = None
         self.h4s = None
 
-        for k,v in ind_to_pop.iteritems():
-            if v not in h1s:
+        try:
+            to_delete = []
+            for k,v in ind_to_pop.iteritems():
+                if v not in h1s:
+                    to_delete.append(k)
+            for k in to_delete:
                 del ind_to_pop[k]
-
+        except AttributeError:
+            pass
         Ftest.__init__(self, vcf_filename, ind_to_pop, **kwa)
         self.calc_params = (self.ind_to_pop, self.h1s)
 
@@ -288,8 +298,8 @@ class PairwiseDiff(Ftest):
             #ids = groups.apply(lambda df:np.nan).index.values
             return calc.divergence(groups)
         else:
-            return np.zeros((hap_df.shape[1]/2,
-                                 hap_df.shape[1]/2))
+            return np.zeros((len(groups),
+                                 len(groups)))
 
     @staticmethod
     def get_calc_stat(*args):

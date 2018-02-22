@@ -41,9 +41,15 @@ def add_info_line(info_dic, line):
             try:
                 info_dic.update({"uncategorised": {line.strip().split('=')[
                                 0][2:]: line.strip().split('=')[1]}})
-            except ValueError, e:
-                print line.strip().split('=')
-                raise e
+            except Exception, e:
+                print line
+                print str(e)
+                logging.warning("Cannot parse {}".format(line))
+                logging.warning(str(e))
+                try:
+                    info_dic["unparsable"].update(line.strip())
+                except KeyError:
+                    info_dic.update({"unparsable":line.strip()})
         except IndexError:
             try:
                 info_dic["unparsable"].update(line.strip())
@@ -374,10 +380,12 @@ def get_haplotype_df(fn,  chrom=None,
         assert (samples_h0 is None) and (samples_h1 is None)
         samples_h0 = samples
         samples_h1 = samples
-    else:
+    elif samples_h0 is not None or samples_h1 is not None:
         samples_h0 = samples_h0 if samples_h0 is not None else []
         samples_h1 = samples_h1 if samples_h1 is not None else []
-
+    else:
+        samples_h0 = header[9:]
+        samples_h1 = header[9:]
     #    assert (samples_h0 is None) == (samples_h1 is None)
     #    if samples_h1 is None:        
     #        samples_h0 = header[9:]
