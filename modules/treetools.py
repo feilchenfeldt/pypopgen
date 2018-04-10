@@ -268,7 +268,7 @@ class HsTree(ete3.Tree):
             migration_arrow_format_args.update(migration_arrow_format_fun(c))
             ax.annotate("",xytext=(-mm.time, mm.destination.y), xy=(-mm.time,mm.source.y),
                          arrowprops=migration_arrow_format_args)
-            ax.annotate("{}%".format(int(mm.fraction*100)), xy=(-mm.time, (mm.destination.y + mm.source.y)/2.),
+            ax.annotate("{}%".format(int(round(mm.fraction*100))), xy=(-mm.time, (mm.destination.y + mm.source.y)/2.),
                         ha='right',va='center', xytext=(-3,0),bbox=dict(boxstyle="round,pad=0.1", fc="w", alpha=0.5, lw=0),
                         textcoords='offset points', color='r')
 
