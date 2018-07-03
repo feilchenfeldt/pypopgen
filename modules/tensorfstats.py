@@ -14,13 +14,16 @@ To run map function of these classes with ipython parallel or
 multiprocessing, one might need to use a pickling tool other than
 the standard pickling module. The module dill works fine for me.
 
+#!!! NAN HAndling breaks F4ratio!!!!
+# make sure that the same rows are removed in all subsamples!
+
 
 """
 
 import logging
 import numpy as np
 import pandas as pd
-
+import os
 #local modules
 import vcfpandas as vp
 import treetools
@@ -37,6 +40,7 @@ class Test(object):
     def test(self, i):
         return i + self.x
     
+    #ACCOUNT FOR NA here?
     def run_parallel(self, rc):
         rc[:].push({'x': 22})
         rc[:].use_cloudpickle()
@@ -103,8 +107,11 @@ class Ftest(object):
 #            t1.columns = pd.MultiIndex.from_arrays(
 #                    [t1.columns, [1] * len(t1.columns)])
         hap_df  = pd.concat([t0, t1], axis=1).sortlevel(axis=1)
-        hap_df = hap_df.dropna(axis=0)
+        #it is enought to drop nas in the allele frequency!
+        #hap_df = hap_df.dropna(axis=0)
         return hap_df
+
+#THINK ABOUT NA handling for this functions
 
     @staticmethod
     def get_af(hap_df, ind_to_pop):
@@ -113,7 +120,7 @@ class Ftest(object):
             af = af.groupby(ind_to_pop, axis=1).mean()
         else:
             af = pd.DataFrame(columns=set(ind_to_pop.values()))
-        return af
+        return af.dropna()
 
     @staticmethod
     def get_ac(hap_df, ind_to_pop):
@@ -122,7 +129,7 @@ class Ftest(object):
             ac = ac.groupby(ind_to_pop, axis=1).sum()
         else:
             ac = pd.DataFrame(columns=set(ind_to_pop.values()))
-        return ac
+        return ac.dropna()
 
     @staticmethod
     def get_n(hap_df, ind_to_pop):
@@ -130,13 +137,14 @@ class Ftest(object):
         Get the number of haplotypes per population.
         """
         if len(hap_df):
-            n = hap_df.groupby(level=0, axis=1).apply(lambda df: df.shape[1])
+            #ACCOUNT FOR NA
+            n = hap_df.groupby(level=0, axis=1).apply(lambda df: df.notnull().sum(axis=1))
             
             n = n.groupby(ind_to_pop).sum()
             
         else:
             n = pd.Series(index=set(ind_to_pop.values()))
-        return n
+        return n.dropna()
 
 
     @staticmethod
@@ -584,7 +592,7 @@ class F4ratio(Dtest):
     """
     ftype = 'F4ratio'
 
-    def __init__(self, vcf_filename, ind_to_pop, h1s, h2s, h3s, h4s, **kwa):
+    def __init__(self, vcf_filename, ind_to_pop, h1s, h2s, h3s, h4s, subsampling_method='per_chunk_noreplace', **kwa):
         
         Dtest.__init__(self, vcf_filename, ind_to_pop, h1s, h2s, h3s, h4s, **kwa)
         
@@ -596,10 +604,10 @@ class F4ratio(Dtest):
             pop_to_hap[pop].append((s, 1))
         
         self.pop_to_hap = pop_to_hap
-    
+        self.subsampling_method = subsampling_method
 
         self.calc_params = (self.ind_to_pop, self.pop_to_hap, self.h1s, self.h2s, 
-                                                                    self.h3s, self.h4s)
+                                                                    self.h3s, self.h4s, self.subsampling_method)
 
 
     @staticmethod
@@ -608,32 +616,54 @@ class F4ratio(Dtest):
             af = hap_df.groupby(hap_to_pop, axis=1).mean()
         else:
             af = pd.DataFrame(columns=set(hap_to_pop.values()))
-        return af
+        return af.dropna()
 
     @staticmethod
-    def calc_stat_static(chunk1, chunk2, ind_to_pop, pop_to_hap, h1s, h2s, h3s, h4s):
+    def calc_stat_static(chunk1, chunk2, ind_to_pop, pop_to_hap, h1s, h2s, h3s, h4s, subsampling_method):
         hap_df = F4ratio.get_hap_df(chunk1, chunk2)
         af = F4ratio.get_af(hap_df, ind_to_pop)
         #do the random subsets for each chunk independently
         
-        hap_to_pop_ab = {}
-    
-        for h3 in h3s:
-            samples = pop_to_hap[h3]
-            sample_idx = np.arange(len(samples))
-            try:
-                ixa = np.random.choice(sample_idx, len(samples)/2, replace=False)
-            except ValueError, e:
-                raise e
-            ixb = [i for i in sample_idx if i not in ixa]
-            hap_to_pop_ab.update({samples[i]: h3 + '_a' for i in ixa})
-            hap_to_pop_ab.update({samples[i]: h3 + '_b' for i in ixb})
+        if subsampling_method == 'per_chunk_noreplace' or \
+            subsampling_method == 'per_chunk_replace':
+            #r00 = os.urandom(3)
+            #r0 = int(r00.encode('hex'), 16)
+            #r1 = int(np.ceil(hap_df.sum().sum()/1111.))
+            #np.random.seed(int(r0*r1))
+            hap_to_pop_a = {}
+            hap_to_pop_b = {}
 
-        af_sub = F4ratio.get_af_hap(hap_df, hap_to_pop_ab)
+            for h3 in h3s:
+                samples = pop_to_hap[h3]
+                sample_idx = np.arange(len(samples))
+                #try:
+                #    ixa = np.random.choice(sample_idx, len(samples)/2, replace=False)
+                #except ValueError, e:
+                #    raise e
+                ixa = np.random.choice(sample_idx, len(samples)/2, replace=False)
+                if subsampling_method == 'per_chunk_noreplace':
+                    ixb = [i for i in sample_idx if i not in ixa]
+                else: 
+                    ixb = np.random.choice(sample_idx, len(samples)/2, replace=False)
+                    #ixb = np.random.choice(sample_idx, len(samples)/2, replace=False)
+                hap_to_pop_a.update({samples[i]: h3 for i in ixa})
+                hap_to_pop_b.update({samples[i]: h3  for i in ixb})
+            af3_a = F4ratio.get_af_hap(hap_df, hap_to_pop_a)[h3s]
+            af3_b = F4ratio.get_af_hap(hap_df, hap_to_pop_b)[h3s]
+            #hap_df[samples_a].mean(axis=1)
+            #af3_b = hap_df[samples_b].mean(axis=1)
+
+            #af_sub = F4ratio.get_af_hap(hap_df, hap_to_pop_ab)
+        elif subsampling_method == 'no_subsampling':
+            #this is equivalent to f_hom from Martin, Davey, Jiggins
+            af3_a = af[h3s]
+            af3_b = af[h3s]
+         
         if len(af):
-            return calc.f4ratio(af[h1s], af[h2s], af[h3s], af_sub[[h3+'_a' for h3 in h3s]], af_sub[[h3+'_b' for h3 in h3s]], af[h4s])
+            return calc.f4ratio(af[h1s], af[h2s], af[h3s], af3_a, af3_b, af[h4s])
         else:
             return np.zeros((len(h1s),len(h2s),len(h3s),len(h4s))), np.zeros((len(h1s),len(h2s),len(h3s),len(h4s)))
+
 
     @staticmethod
     def get_calc_stat(*args):
@@ -642,7 +672,12 @@ class F4ratio(Dtest):
         return calc_stat
 
 
-
+class F4ratioH3derived(Dtest):
+    """
+    An implementation of the f4ratio where
+    only sites are considered where h3 is derived.
+    """
+    pass
 
 class calc:
     """

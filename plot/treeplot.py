@@ -46,7 +46,7 @@ def plot_node_tree(tree, ax=None, x0=0,y0=0, plot_leaf_names=True, em=0.7,fontsi
 
             nletters = len(node.name)
             if plot_leaf_names:
-                ax.annotate(node.name,xy=(depth+em*maxletters,y), va='center',ha='right')
+                ax.annotate(node.name,xy=(depth+em*maxletters,y), va='center',ha='right', fontsize=10)
             hline2, = ax.plot([x+1,depth+em*(maxletters-nletters)], [y,y], '-',color='k')
         else:
             #print rows_below
@@ -140,7 +140,7 @@ def draw_tree(tree, x , y, depth,ax=None, orientation='horizontal',
             
             
             lbl = ax.annotate(tree.name,xy=get_x_y((depth+name_margin)*x_inc,y,orientation),
-                        fontsize=12, va=va,ha=ha,rotation=rotation)
+                        fontsize=10, va=va,ha=ha,rotation=rotation)
             r = ax.get_figure().canvas.get_renderer()
             tbox = lbl.get_window_extent(renderer=r)
             dbox = tbox.transformed(ax.transData.inverted())
@@ -181,6 +181,7 @@ def plot_tree(tree0, x0=0, y0=0, plot_labels=True, ax=None, labeldist_correct_fa
                        terminals):
             anns.append(ax.annotate(t.name, xy=(x, y0), rotation=90, 
                         horizontalalignment='center', verticalalignment='bottom',
+                        fontsize=10
                                    # xycoords='figure pixels'
                                    ))
 
