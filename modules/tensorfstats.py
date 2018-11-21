@@ -773,6 +773,10 @@ class calc:
         af = groups.mean()
         ac = groups.sum()
         n = groups.apply(lambda df: df.notnull().sum(axis=1))
+        #handle missing data
+        af = af.dropna(axis=0)
+        ac = ac.dropna(axis=0)
+        n = n.loc[af.index]
         pi =  np.zeros((af.shape[1], af.shape[1]))
         np.fill_diagonal(pi,(2*af*(1-(ac-1.)/(n-1))).sum())
         dxy = np.einsum('ij,ik->jk',af, 1-af) + np.einsum('ij,ik->jk',1-af, af)

@@ -20,7 +20,7 @@ BEGIN {for (n=0; n<256; n++) ord[sprintf("%c",n)]=n;
             };
     };
     if (cov-mq0 == 0) {rmsmq="NA"} else {rmsmq=sqrt(sm*1.0/(cov-mq0))};
-    print $1,$2, cov, rmsmq, mq0
+    print $1, $2, cov, rmsmq, mq0
         
 }
 

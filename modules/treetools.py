@@ -310,21 +310,26 @@ class HsTree(ete3.Tree):
         
 
 
-def dm_to_tree(dm, method='nj', ladderize=True, outgroup=None, 
+def dm_to_tree(dm, names=None, method='nj', ladderize=True, outgroup=None, 
                                                 prune_outgroup=True):
-    dm = dm.astype(float)
-    distance_triangular = [list(dm.values[i,:i+1]) for i in range(len(dm))]
-    try:
-        dm = _DistanceMatrix(names= [str(i) for i in dm.columns],
-                    matrix=distance_triangular)
-    except Exception,e:
-        print list(dm.columns)
-        print [type(i) for i in dm.columns]
-        print type(distance_triangular)
-        print  type(distance_triangular[0])
-        print  set([str(type(i)) for j in distance_triangular for i in j])
-        print distance_triangular
-        raise e
+    dm1 = np.array(dm).astype(float)
+    distance_triangular = [list(dm1[i,:i+1]) for i in np.arange(len(dm1))]
+    #try:
+    if names is None:
+        try:
+            names = dm.columns
+        except AttributeError:
+            names = np.arange(len(dm))
+    dm = _DistanceMatrix(names= [str(i) for i in names],
+                matrix=distance_triangular)
+#    except Exception,e:
+#        print names
+#        #print [type(i) for i in dm.columns]
+#        print type(distance_triangular)
+#        print  type(distance_triangular[0])
+#        print  set([str(type(i)) for j in distance_triangular for i in j])
+#        print distance_triangular
+#        raise e
     constructor = DistanceTreeConstructor()
     algorithm = getattr(constructor,method)
     tree = algorithm(dm)
