@@ -349,7 +349,7 @@ class converters:
     def depth(samples):
         return {n: get_depth for n in samples}
 
-def get_genotype_df(fn, chrom, start=None, end=None, header=None, samples=None):
+def get_genotype_df(fn, chrom=None, start=None, end=None, header=None, samples=None):
 
     if header is None:
         header, _ = parse_vcf_header(fn)

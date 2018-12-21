@@ -120,7 +120,7 @@ class Ftest(object):
             af = af.groupby(ind_to_pop, axis=1).mean()
         else:
             af = pd.DataFrame(columns=set(ind_to_pop.values()))
-        return af.dropna()
+        return af#dropna()
 
     @staticmethod
     def get_ac(hap_df, ind_to_pop):
@@ -129,7 +129,7 @@ class Ftest(object):
             ac = ac.groupby(ind_to_pop, axis=1).sum()
         else:
             ac = pd.DataFrame(columns=set(ind_to_pop.values()))
-        return ac.dropna()
+        return ac#.dropna()
 
     @staticmethod
     def get_n(hap_df, ind_to_pop):
@@ -592,7 +592,7 @@ class F4ratio(Dtest):
     """
     ftype = 'F4ratio'
 
-    def __init__(self, vcf_filename, ind_to_pop, h1s, h2s, h3s, h4s, subsampling_method='per_chunk_noreplace', **kwa):
+    def __init__(self, vcf_filename, ind_to_pop, h1s, h2s, h3s, h4s, subsampling_method='per_chunk_replace', **kwa):
         
         Dtest.__init__(self, vcf_filename, ind_to_pop, h1s, h2s, h3s, h4s, **kwa)
         
@@ -616,7 +616,7 @@ class F4ratio(Dtest):
             af = hap_df.groupby(hap_to_pop, axis=1).mean()
         else:
             af = pd.DataFrame(columns=set(hap_to_pop.values()))
-        return af.dropna()
+        return af
 
     @staticmethod
     def calc_stat_static(chunk1, chunk2, ind_to_pop, pop_to_hap, h1s, h2s, h3s, h4s, subsampling_method):
@@ -660,7 +660,14 @@ class F4ratio(Dtest):
             af3_b = af[h3s]
          
         if len(af):
-            return calc.f4ratio(af[h1s], af[h2s], af[h3s], af3_a, af3_b, af[h4s])
+            #here we remove all SNP sites that contain
+            #nans in any population. This is unfortunate,
+            #because it looses info (for the comparisons without nan_)
+            #but np.einsum cannot handle any nans.
+            def nn(df):
+                return df.notnull().all(axis=1)
+            nnl = nn(af[h1s])&nn(af[h2s])&nn(af[h3s])&nn(af3_a)&nn(af3_b)&nn(af[h4s])
+            return calc.f4ratio(af[nnl][h1s], af[nnl][h2s], af[nnl][h3s], af3_a[nnl], af3_b[nnl], af[nnl][h4s])
         else:
             return np.zeros((len(h1s),len(h2s),len(h3s),len(h4s))), np.zeros((len(h1s),len(h2s),len(h3s),len(h4s)))
 

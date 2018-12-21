@@ -12,6 +12,8 @@ import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
+import haplotools as hap
+
 def newick_to_node_name(nwk):
     """
     Create a formalized node name.
