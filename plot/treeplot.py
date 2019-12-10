@@ -236,6 +236,7 @@ def plot_tree(tree0, x0=0, y0=0, plot_labels=True, ax=None, labeldist_correct_fa
                 t.x = (t.x+s.x)/2.
                 t.y = ypos
                 s.delete()
+                ylim_max = max(ypos*1.02,ylim_max)
                 
         #print len(tree), tree
         if len(tree)<2:

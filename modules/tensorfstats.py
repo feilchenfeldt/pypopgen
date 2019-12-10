@@ -758,6 +758,10 @@ class calc:
     @staticmethod
     def divergence(groups):
         """
+        !!! careful the ordering of groups can be surprising.
+        use [n for n,_ in groups] to get the axis labels of result
+
+
         Calculate pairwise differences (pi and dxy).
 
         This function returns an unbiased estimate 

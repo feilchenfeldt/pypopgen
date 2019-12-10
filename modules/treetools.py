@@ -189,7 +189,8 @@ class HsTree(ete3.Tree):
                                     xytext=(0,1),
                                     textcoords='offset points',
                                     va='bottom',
-                                    bbox=dict(boxstyle="round,pad=0.05", fc="w", alpha=0.5, lw=0))       
+                                    bbox=dict(boxstyle="round,pad=0.05", fc="w", alpha=0.5, lw=0),
+                                        size=11)       
         default_leaf_format_args = {'xytext':(5,0),
                                     'textcoords':'offset points',
                                     'va':'center'}
@@ -253,13 +254,17 @@ class HsTree(ete3.Tree):
 
                     elif style == 'diagonal':
                         ax.plot([-time,-c.get_time()],[node.y, c.y]) 
-
-                    node_name = node_name_fun(c)
-                    if node_name:
-                        node_format_args = copy.deepcopy(default_node_format_args)
-                        node_format_args.update(node_name_format_fun(c))
-                        ax.annotate(node_name,xy=((-time-c.get_time())/2., c.y),
-                                     **node_format_args)
+                    
+                    if not c.is_leaf():
+                        node_name = node_name_fun(c)
+                        if node_name:
+                            node_format_args = copy.deepcopy(default_node_format_args)
+                            node_format_args.update(node_name_format_fun(c))
+                            ax.annotate(node_name, xy=((-time-c.get_time())/2., c.y),
+                                         **node_format_args)
+                            #if "Haplochromis" in node_name:
+                            #    print 'wtf'
+                            #    return node
 
         for mm in tree.mass_migrations:
             #print "plotting migration one", mm.time, mm.source.get_name(), mm.destination.get_name()
@@ -322,7 +327,7 @@ def dm_to_tree(dm, names=None, method='nj', ladderize=True, outgroup=None,
             names = dm.columns
         except AttributeError:
             names = np.arange(len(dm))
-    dm = _DistanceMatrix(names= [str(i) for i in names],
+    dm = _DistanceMatrix(names= [str(i.encode("utf-8")) for i in names],
                 matrix=distance_triangular)
 #    except Exception,e:
 #        print names

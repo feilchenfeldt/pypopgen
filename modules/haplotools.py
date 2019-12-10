@@ -23,7 +23,7 @@ def pairwise_diff_mat(df):
         gc.collect()
     else:
         diff = 0
-        raise Exception('BLABLA')
+        #raise Exception('BLABLA')
     return pd.DataFrame(diff, index=cols, columns=cols)
 
 

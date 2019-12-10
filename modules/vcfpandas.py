@@ -159,9 +159,13 @@ def map_fly_reduce_haplo(fn, fun, samples_h0=None, samples_h1=None, chrom=None,
     elif samples_h1 is None:
         samples_h1 = []
         samples_h0 = [str(s) for s in samples_h0]
-
+    #try: 
     t0 = get_vcf_df(fn, chrom=chrom, start=start, end=end, header=header, usecols=['CHROM', 'POS'] + samples_h0,
                     converters=converters.first_haplotype(samples_h0), chunksize=chunksize, **read_args)
+    #except ValueError:
+    #    print header
+    #    print ['CHROM', 'POS'] + samples_h0
+
     t1 = get_vcf_df(fn, chrom=chrom, start=start, end=end, header=header, usecols=['CHROM', 'POS'] + samples_h1,
                     converters=converters.second_haplotype(samples_h1), chunksize=chunksize, **read_args)
 
@@ -273,6 +277,10 @@ def get_first_haplotype(s):
     except ValueError:
         assert gt_str[0] == '.', 'Unknown allele {}'.format(gt_str[0])
         return np.nan
+    #except IndexError:
+        #this should at least lead to a clear warning. It points to 
+        #an error in the vcf formatting!!!!
+    #    return np.nan
 
 
 def get_second_haplotype(s):
@@ -282,6 +290,9 @@ def get_second_haplotype(s):
     except ValueError:
         assert gt_str[2] == '.', 'Unknown allele {}'.format(gt_str[2])
         return np.nan
+    #except IndexError:
+        #print gt_str
+    #    return np.nan
 
 
 def get_depth(s):
